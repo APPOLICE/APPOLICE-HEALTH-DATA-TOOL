@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import "bootstrap/dist/css/bootstrap.min.css";
 import PatientSelector from "../institutes/PatientSelector";
@@ -56,6 +56,157 @@ const PharmacyPrescriptionForm = () => {
     FamilyMember_ID: "",
     Medicines: [{ medicineId: "", medicineName: "", medicineType: "", dosageForm: "", type: "", strength: "", expiryDate: "", quantity: 0 }],
   });
+  const [quickMedicineSearches, setQuickMedicineSearches] = useState([]);
+  const [quickMedicineSearchOpen, setQuickMedicineSearchOpen] = useState([]);
+  const quickMedicineSearchRefs = useRef({});
+
+  const SAMPLE_MEDICINES = [
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Tablet", Strength: "250mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Syrup", Strength: "120mg/5ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Injection", Strength: "150mg/ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Tablet", Strength: "500mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Suspension", Strength: "250mg/5ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Drop", Strength: "100mg/ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Caplet", Strength: "650mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Effervescent Tablet", Strength: "500mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Suppository", Strength: "125mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Infusion", Strength: "1g/100ml" }
+  ];
+
+  const normalizeSearchText = (value) => String(value || "").trim().toLowerCase();
+
+  const getQuickMedicineCandidates = () => {
+    const masterEntries = Array.isArray(getMasterMedicineEntries(masterMap)) ? getMasterMedicineEntries(masterMap) : [];
+    const masterCandidates = masterEntries.map((entry) => ({
+      Medicine_Name: entry.value_name,
+      Medicine_Type: entry.medicineType,
+      Dosage_Form: entry.dosageForm,
+      Strength: entry.strength,
+      source: "master"
+    }));
+
+    const inventoryCandidates = (inventory || []).map((item) => ({
+      Medicine_Name: item.Medicine_Name,
+      Medicine_Type: item.Medicine_Type || item.Type || "",
+      Dosage_Form: item.Dosage_Form || item.dosageForm || "",
+      Strength: item.Strength || "",
+      source: "inventory",
+      raw: item
+    }));
+
+    const all = [...inventoryCandidates, ...masterCandidates];
+    const unique = [];
+    const seen = new Set();
+
+    all.forEach((item) => {
+      const key = `${normalizeSearchText(item.Medicine_Name)}|${normalizeSearchText(item.Medicine_Type)}|${normalizeSearchText(item.Dosage_Form)}|${normalizeSearchText(item.Strength)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(item);
+      }
+    });
+
+    return unique.length ? unique : SAMPLE_MEDICINES;
+  };
+
+  const getQuickMedicineOptionsForRow = (index) => {
+    const typedValue = normalizeSearchText(quickMedicineSearches[index]);
+    const allMedicines = getQuickMedicineCandidates();
+    if (!typedValue) return allMedicines;
+
+    return allMedicines.filter((med) => {
+      const haystack = [
+        med?.Medicine_Name,
+        med?.Medicine_Type,
+        med?.Dosage_Form,
+        med?.Strength,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(typedValue);
+    });
+  };
+
+  const resetMedicineRow = (index) => {
+    setFormData((prev) => {
+      const next = [...prev.Medicines];
+      if (!next[index]) return prev;
+      next[index] = {
+        ...next[index],
+        medicineId: "",
+        medicineName: "",
+        medicineType: "",
+        type: "",
+        dosageForm: "",
+        strength: "",
+        expiryDate: ""
+      };
+      return { ...prev, Medicines: next };
+    });
+  };
+
+  const closeAllQuickMedicineSearches = () => {
+    setQuickMedicineSearchOpen((prev) => prev.map(() => false));
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      const refs = quickMedicineSearchRefs.current || {};
+      const clickedInside = Object.values(refs).some((ref) => ref && ref.contains(event.target));
+      if (!clickedInside) {
+        closeAllQuickMedicineSearches();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const applyQuickMedicineSelection = (index, selectedMedicine) => {
+    if (!selectedMedicine) return;
+
+    const matchedInventory = (inventory || []).find((item) =>
+      normalizeSearchText(item.Medicine_Name) === normalizeSearchText(selectedMedicine.Medicine_Name) &&
+      normalizeSearchText(item.Medicine_Type || item.Type) === normalizeSearchText(selectedMedicine.Medicine_Type) &&
+      normalizeSearchText(item.Medicine_Form || item.Dosage_Form || item.dosageForm) === normalizeSearchText(selectedMedicine.Dosage_Form) &&
+      normalizeSearchText(item.Strength) === normalizeSearchText(selectedMedicine.Strength)
+    );
+
+    const selected = matchedInventory || selectedMedicine;
+    const medicineName = String(selected.Medicine_Name || selected.name || "").trim();
+    const medicineType = String(selected.Medicine_Type || selected.Type || selected.medicineType || "").trim();
+    const dosageForm = String(selected.Dosage_Form || selected.dosageForm || selected.Dosage_Form || "").trim();
+    const strength = String(selected.Strength || selected.strength || "").trim();
+    const medicineId = matchedInventory ? String(matchedInventory.Medicine_Code || "") : "";
+    const expiryDate = matchedInventory ? matchedInventory.Expiry_Date : "";
+
+    setFormData((prev) => {
+      const next = [...prev.Medicines];
+      if (!next[index]) next[index] = { medicineId: "", medicineName: "", medicineType: "", dosageForm: "", type: "", strength: "", expiryDate: "", quantity: 0 };
+      next[index] = {
+        ...next[index],
+        medicineId,
+        medicineName,
+        medicineType,
+        type: medicineType,
+        dosageForm,
+        strength,
+        expiryDate
+      };
+      return { ...prev, Medicines: next };
+    });
+
+    setQuickMedicineSearches((prev) => {
+      const next = [...prev];
+      next[index] = medicineName;
+      return next;
+    });
+    setQuickMedicineSearchOpen((prev) => {
+      const next = [...prev];
+      next[index] = false;
+      return next;
+    });
+  };
 
   // Build options for medicine select combining inventory and master data
   const getPharmacyOptionsByTypeAndForm = (medicineTypeValue, dosageFormValue) => {
@@ -677,6 +828,16 @@ const addMedicineToForm = (inventoryItem, quantity) => {
 const handleSubmit = async (e) => {
   e.preventDefault();
 
+  if (!formData.Institute_ID) {
+    alert("Institute information is missing. Please reload the page or select the institute again.");
+    return;
+  }
+
+  if (!formData.Employee_ID) {
+    alert("Please select a patient from the queue before submitting the prescription.");
+    return;
+  }
+
   const selectedRows = formData.Medicines.filter((medicine) => medicine.medicineId);
 
   if (selectedRows.length === 0) {
@@ -1065,6 +1226,79 @@ const handleSubmit = async (e) => {
 
                 {formData.Medicines.map((med, i) => (
                   <div key={i} className="mb-3 medicine-row">
+                    <div className="mb-2 position-relative" ref={(el) => { quickMedicineSearchRefs.current[i] = el; }}>
+                      <label className="form-label fw-semibold">Quick Medicine Search</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Search medicine by name"
+                        value={quickMedicineSearches[i] ?? ""}
+                        onFocus={() => {
+                          setQuickMedicineSearchOpen((prev) => {
+                            const next = [...prev];
+                            next[i] = true;
+                            return next;
+                          });
+                        }}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setQuickMedicineSearches((prev) => {
+                            const next = [...prev];
+                            next[i] = value;
+                            return next;
+                          });
+                          setQuickMedicineSearchOpen((prev) => {
+                            const next = [...prev];
+                            next[i] = true;
+                            return next;
+                          });
+                          if (!value.trim()) {
+                            resetMedicineRow(i);
+                          }
+                        }}
+                      />
+
+                      {quickMedicineSearchOpen[i] && (
+                        <div className="border rounded bg-white shadow-sm mt-1 position-relative" style={{ maxHeight: "220px", overflowY: "auto", zIndex: 15 }}>
+                          {getQuickMedicineOptionsForRow(i).length > 0 ? (
+                            getQuickMedicineOptionsForRow(i).map((item, optionIndex) => {
+                              const isSelected =
+                                normalizeSearchText(item.Medicine_Name) === normalizeSearchText(med.medicineName) &&
+                                normalizeSearchText(item.Medicine_Type) === normalizeSearchText(med.medicineType || med.type) &&
+                                normalizeSearchText(item.Dosage_Form) === normalizeSearchText(med.dosageForm) &&
+                                normalizeSearchText(item.Strength) === normalizeSearchText(med.strength);
+
+                              return (
+                                <button
+                                  key={`${item.Medicine_Name || optionIndex}-${item.Strength || "no-strength"}-${item.Dosage_Form || "no-form"}-${item.Medicine_Type || "no-type"}`}
+                                  type="button"
+                                  className={`d-block text-start w-100 border-0 px-3 py-2 ${isSelected ? "bg-primary text-white" : "bg-white"}`}
+                                  style={{ borderBottom: optionIndex < getQuickMedicineOptionsForRow(i).length - 1 ? "1px solid #f1f1f1" : "none" }}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => applyQuickMedicineSelection(i, item)}
+                                >
+                                  <div className="fw-semibold fs-6">{item.Medicine_Name || "Unnamed medicine"}</div>
+                                  <div className="small mt-1 d-flex flex-wrap gap-2 align-items-center">
+                                    <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                      {item.Strength || "No strength"}
+                                    </span>
+                                    <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                      {item.Dosage_Form || "No dosage form"}
+                                    </span>
+                                    <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                      {item.Medicine_Type || "No type"}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-muted small">No medicines found.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="d-flex gap-2 align-items-start">
                       <select
                         className="form-select"

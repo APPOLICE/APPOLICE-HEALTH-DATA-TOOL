@@ -1,0 +1,18 @@
+489: const [quickMedicineSearches, setQuickMedicineSearches] = useState([]);
+490: const [quickMedicineSearchOpen, setQuickMedicineSearchOpen] = useState([]);
+492: const getQuickMedicineOptionsForRow = (index) => {
+493: const typedValue = String(quickMedicineSearches[index] ?? "").trim().toLowerCase();
+513: const applyQuickMedicineSelection = (index, selectedMedicine) => {
+541: setQuickMedicineSearches((prev) => {
+546: setQuickMedicineSearchOpen((prev) => {
+2599: <label className="form-label fw-semibold">Quick Medicine Search</label>
+2604: value={quickMedicineSearches[i] ?? ""}
+2606: setQuickMedicineSearchOpen((prev) => {
+2614: setQuickMedicineSearchOpen((prev) => {
+2623: setQuickMedicineSearches((prev) => {
+2628: setQuickMedicineSearchOpen((prev) => {
+2636: {quickMedicineSearchOpen[i] && (
+2638: {getQuickMedicineOptionsForRow(i).length > 0 ? (
+2639: getQuickMedicineOptionsForRow(i).map((item, optionIndex) => (
+2644: style={{ borderBottom: optionIndex < getQuickMedicineOptionsForRow(i).length - 1 ? "1px solid #f1f1f1" : "none" }}
+2646: onClick={() => applyQuickMedicineSelection(i, item)}

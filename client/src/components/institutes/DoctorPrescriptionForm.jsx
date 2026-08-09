@@ -85,11 +85,11 @@ const DoctorPrescriptionForm = () => {
     const xray = report?.xray || null;
     return String(
       record?._id ||
-        record?.visit_id ||
-        record?.visitId ||
-        xray?._id ||
-        xray?.Xray_ID ||
-        "download"
+      record?.visit_id ||
+      record?.visitId ||
+      xray?._id ||
+      xray?.Xray_ID ||
+      "download"
     );
   };
 
@@ -98,12 +98,12 @@ const DoctorPrescriptionForm = () => {
     const test = report?.test || null;
     return String(
       test?._id ||
-        test?.Test_ID?._id ||
-        test?.Test_ID ||
-        record?._id ||
-        record?.visit_id ||
-        record?.visitId ||
-        "download"
+      test?.Test_ID?._id ||
+      test?.Test_ID ||
+      record?._id ||
+      record?.visit_id ||
+      record?.visitId ||
+      "download"
     );
   };
 
@@ -386,9 +386,9 @@ const DoctorPrescriptionForm = () => {
     }
   };
 
-const normalizeMedicineText = (value) => String(value || "").trim().toLowerCase();
-const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
-  `${normalizeMedicineText(medicineType)}::${normalizeMedicineText(dosageForm)}::${normalizeMedicineText(name)}`;
+  const normalizeMedicineText = (value) => String(value || "").trim().toLowerCase();
+  const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
+    `${normalizeMedicineText(medicineType)}::${normalizeMedicineText(dosageForm)}::${normalizeMedicineText(name)}`;
 
 
 
@@ -486,6 +486,118 @@ const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
     Notes: "",
     Disease_Name: ""
   });
+  const [quickMedicineSearches, setQuickMedicineSearches] = useState([]);
+  const [quickMedicineSearchOpen, setQuickMedicineSearchOpen] = useState([]);
+  const quickMedicineSearchRefs = useRef({});
+
+  const SAMPLE_MEDICINES = [
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Tablet", Strength: "250mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Syrup", Strength: "120mg/5ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Injection", Strength: "150mg/ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Tablet", Strength: "500mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Suspension", Strength: "250mg/5ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Drop", Strength: "100mg/ml" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Caplet", Strength: "650mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Effervescent Tablet", Strength: "500mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Suppository", Strength: "125mg" },
+    { Medicine_Name: "Paracetamol", Medicine_Type: "Analgesics & Anti Pyretics", Dosage_Form: "Infusion", Strength: "1g/100ml" }
+  ];
+
+  const normalizeSearchText = (value) => String(value || "").trim().toLowerCase();
+
+  const getQuickMedicineOptionsForRow = (index) => {
+    const typedValue = normalizeSearchText(quickMedicineSearches[index]);
+    const allMedicines = Array.isArray(inventoryMedicines) && inventoryMedicines.length > 0 ? inventoryMedicines : SAMPLE_MEDICINES;
+    if (!allMedicines.length) return [];
+    if (!typedValue) return allMedicines;
+
+    return allMedicines.filter((med) => {
+      const haystack = [
+        med?.Medicine_Name,
+        med?.Medicine_Type,
+        med?.Dosage_Form,
+        med?.Strength,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(typedValue);
+    });
+  };
+
+  const resetMedicineRow = (index) => {
+    setFormData((prev) => {
+      const nextMedicines = [...prev.Medicines];
+      if (!nextMedicines[index]) return prev;
+      nextMedicines[index] = {
+        ...nextMedicines[index],
+        Medicine_Name: "",
+        Medicine_Type: "",
+        Dosage_Form: "",
+        Type: "",
+        Strength: ""
+      };
+      return { ...prev, Medicines: nextMedicines };
+    });
+  };
+
+  const closeAllQuickMedicineSearches = () => {
+    setQuickMedicineSearchOpen((prev) => prev.map(() => false));
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      const refs = quickMedicineSearchRefs.current || {};
+      const clickedInside = Object.values(refs).some((ref) => ref && ref.contains(event.target));
+      if (!clickedInside) {
+        closeAllQuickMedicineSearches();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const applyQuickMedicineSelection = (index, selectedMedicine) => {
+    if (!selectedMedicine) return;
+
+    const findExactMatch = (med) =>
+      normalizeSearchText(med?.Medicine_Name) === normalizeSearchText(selectedMedicine?.Medicine_Name || selectedMedicine?.value_name) &&
+      normalizeSearchText(med?.Medicine_Type) === normalizeSearchText(selectedMedicine?.Medicine_Type || selectedMedicine?.medicineType) &&
+      normalizeSearchText(med?.Dosage_Form) === normalizeSearchText(selectedMedicine?.Dosage_Form || selectedMedicine?.dosageForm) &&
+      normalizeSearchText(med?.Strength) === normalizeSearchText(selectedMedicine?.Strength || selectedMedicine?.strength);
+
+    const inventoryMatch = (inventoryMedicines || []).find(findExactMatch) || selectedMedicine;
+
+    const medicineName = String(inventoryMatch?.Medicine_Name || inventoryMatch?.value_name || "").trim();
+    const medicineType = String(inventoryMatch?.Medicine_Type || inventoryMatch?.medicineType || "").trim();
+    const dosageForm = String(inventoryMatch?.Dosage_Form || inventoryMatch?.dosageForm || "").trim();
+    const strength = String(inventoryMatch?.Strength || inventoryMatch?.strength || "").trim();
+
+    setFormData((prev) => {
+      const nextMedicines = [...prev.Medicines];
+      if (!nextMedicines[index]) {
+        nextMedicines[index] = { Medicine_Name: "", Medicine_Type: "", Dosage_Form: "", Type: "", FoodTiming: "", Strength: "", Morning: false, Afternoon: false, Night: false, Duration: "", Remarks: "", Quantity: 0, ToBePrescribed: false, toBePrescribed: false, IsToBePrescribed: false };
+      }
+      nextMedicines[index].Medicine_Name = medicineName;
+      nextMedicines[index].Medicine_Type = medicineType;
+      nextMedicines[index].Type = medicineType;
+      nextMedicines[index].Dosage_Form = dosageForm;
+      nextMedicines[index].Strength = strength;
+      return { ...prev, Medicines: nextMedicines };
+    });
+
+    setQuickMedicineSearches((prev) => {
+      const next = [...prev];
+      next[index] = medicineName;
+      return next;
+    });
+    setQuickMedicineSearchOpen((prev) => {
+      const next = [...prev];
+      next[index] = false;
+      return next;
+    });
+  };
 
   const getStrengthOptions = (medicineName, medicineType = "", dosageForm = "") => {
     if (!medicineName) return [];
@@ -534,12 +646,12 @@ const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
       const payload = res.data && res.data.data ? res.data.data : res.data || {};
       medicineEntries = Array.isArray(payload?.medicines)
         ? payload.medicines.map((item) => ({
-            value_name: item?.value_name,
-            medicineType: item?.medicineType,
-            dosageForm: item?.dosageForm,
-            strength: item?.strength,
-            status: item?.status || "Active"
-          }))
+          value_name: item?.value_name,
+          medicineType: item?.medicineType,
+          dosageForm: item?.dosageForm,
+          strength: item?.strength,
+          status: item?.status || "Active"
+        }))
         : [];
     } catch {
       medicineEntries = getMasterMedicineEntries(masterMap);
@@ -654,10 +766,10 @@ const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
       );
       const testsCategoryValues = testsCategory?._id
         ? await axios
-            .get(`${BACKEND_URL}/master-data-api/values`, {
-              params: { categoryId: testsCategory._id, includeArchived: "false" }
-            })
-            .catch(() => ({ data: [] }))
+          .get(`${BACKEND_URL}/master-data-api/values`, {
+            params: { categoryId: testsCategory._id, includeArchived: "false" }
+          })
+          .catch(() => ({ data: [] }))
         : { data: [] };
 
       const masterValues = Array.isArray(testsCategoryValues.data) ? testsCategoryValues.data : [];
@@ -711,90 +823,90 @@ const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
       setTestsLoading(false);
       return;
       if (false) {
-      const normalizeLoose = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-      const normalizeCategoryKey = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
-      const isActive = (status) => String(status || "active").trim().toLowerCase() === "active";
-      const structRes = await axios
-        .get(`${BACKEND_URL}/master-data-api/tests-structure`, {
-          params: instituteId
-            ? { instituteId, includeInactive: false, _t: Date.now() }
-            : { includeInactive: false, _t: Date.now() }
-        })
-        .catch(() => ({ data: { categories: [], testsByCategory: {} } }));
+        const normalizeLoose = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const normalizeCategoryKey = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+        const isActive = (status) => String(status || "active").trim().toLowerCase() === "active";
+        const structRes = await axios
+          .get(`${BACKEND_URL}/master-data-api/tests-structure`, {
+            params: instituteId
+              ? { instituteId, includeInactive: false, _t: Date.now() }
+              : { includeInactive: false, _t: Date.now() }
+          })
+          .catch(() => ({ data: { categories: [], testsByCategory: {} } }));
 
-      const categoryItems = Array.isArray(structRes.data?.categoryItems)
-        ? structRes.data.categoryItems
-        : [];
-      const apiTestsByCategory = structRes.data?.testsByCategory && typeof structRes.data.testsByCategory === "object"
-        ? structRes.data.testsByCategory
-        : {};
+        const categoryItems = Array.isArray(structRes.data?.categoryItems)
+          ? structRes.data.categoryItems
+          : [];
+        const apiTestsByCategory = structRes.data?.testsByCategory && typeof structRes.data.testsByCategory === "object"
+          ? structRes.data.testsByCategory
+          : {};
 
-      const activeCategoryItems = categoryItems
-        .filter((item) => item && !item.archived && isActive(item.status))
-        .map((item) => ({
-          _id: String(item?._id || item?.id || "").trim(),
-          name: String(item?.name || item?.value_name || "").trim()
-        }))
-        .filter((item) => item.name);
+        const activeCategoryItems = categoryItems
+          .filter((item) => item && !item.archived && isActive(item.status))
+          .map((item) => ({
+            _id: String(item?._id || item?.id || "").trim(),
+            name: String(item?.name || item?.value_name || "").trim()
+          }))
+          .filter((item) => item.name);
 
-      const categoryNameById = new Map(
-        activeCategoryItems
-          .filter((item) => item._id)
-          .map((item) => [item._id, item.name])
-      );
-      const allowedCategoryMap = new Map(
-        activeCategoryItems.map((item) => [normalizeCategoryKey(item.name), item.name])
-      );
+        const categoryNameById = new Map(
+          activeCategoryItems
+            .filter((item) => item._id)
+            .map((item) => [item._id, item.name])
+        );
+        const allowedCategoryMap = new Map(
+          activeCategoryItems.map((item) => [normalizeCategoryKey(item.name), item.name])
+        );
 
-      const normalizedTests = Object.entries(apiTestsByCategory).flatMap(([category, rows]) =>
-        (Array.isArray(rows) ? rows : []).map((test) => {
-          const rawCategoryId = String(test?.category_id || test?.categoryId || "").trim();
-          const preferredCategory = rawCategoryId ? categoryNameById.get(rawCategoryId) : "";
-          const fallbackCategory = String(test?.category_name || test?.Group || category || "").trim();
-          const resolvedCategory = String(preferredCategory || fallbackCategory || "").trim();
-          const canonicalCategory = allowedCategoryMap.get(normalizeCategoryKey(resolvedCategory)) || resolvedCategory;
-          return {
-            _id: test?._id || test?.id || "",
-            Test_Name: String(test?.name || test?.Test_Name || "").trim(),
-            Group: canonicalCategory,
-            Reference_Range: String(test?.reference || test?.Reference_Range || "").trim(),
-            Units: String(test?.unit || test?.Units || "").trim(),
-            category_id: rawCategoryId || null,
-            status: String(test?.status || "Active").trim(),
-            archived: Boolean(test?.archived)
-          };
-        })
-      )
-        .filter((test) => {
-          if (!test.Group || !test.Test_Name || test.archived || !isActive(test.status)) return false;
-          if (allowedCategoryMap.size === 0) return true;
-          return allowedCategoryMap.has(normalizeCategoryKey(test.Group));
-        })
-        .filter((test, index, arr) => {
-          const key = `${normalizeLoose(test.Group)}::${normalizeLoose(test.Test_Name)}`;
-          return arr.findIndex((row) => `${normalizeLoose(row.Group)}::${normalizeLoose(row.Test_Name)}` === key) === index;
-        });
+        const normalizedTests = Object.entries(apiTestsByCategory).flatMap(([category, rows]) =>
+          (Array.isArray(rows) ? rows : []).map((test) => {
+            const rawCategoryId = String(test?.category_id || test?.categoryId || "").trim();
+            const preferredCategory = rawCategoryId ? categoryNameById.get(rawCategoryId) : "";
+            const fallbackCategory = String(test?.category_name || test?.Group || category || "").trim();
+            const resolvedCategory = String(preferredCategory || fallbackCategory || "").trim();
+            const canonicalCategory = allowedCategoryMap.get(normalizeCategoryKey(resolvedCategory)) || resolvedCategory;
+            return {
+              _id: test?._id || test?.id || "",
+              Test_Name: String(test?.name || test?.Test_Name || "").trim(),
+              Group: canonicalCategory,
+              Reference_Range: String(test?.reference || test?.Reference_Range || "").trim(),
+              Units: String(test?.unit || test?.Units || "").trim(),
+              category_id: rawCategoryId || null,
+              status: String(test?.status || "Active").trim(),
+              archived: Boolean(test?.archived)
+            };
+          })
+        )
+          .filter((test) => {
+            if (!test.Group || !test.Test_Name || test.archived || !isActive(test.status)) return false;
+            if (allowedCategoryMap.size === 0) return true;
+            return allowedCategoryMap.has(normalizeCategoryKey(test.Group));
+          })
+          .filter((test, index, arr) => {
+            const key = `${normalizeLoose(test.Group)}::${normalizeLoose(test.Test_Name)}`;
+            return arr.findIndex((row) => `${normalizeLoose(row.Group)}::${normalizeLoose(row.Test_Name)}` === key) === index;
+          });
 
-      const categoriesFromTests = Array.from(
-        new Map(
-          normalizedTests.map((test) => [normalizeCategoryKey(test.Group), test.Group])
-        ).values()
-      )
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
+        const categoriesFromTests = Array.from(
+          new Map(
+            normalizedTests.map((test) => [normalizeCategoryKey(test.Group), test.Group])
+          ).values()
+        )
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
 
-      const finalCategories = allowedCategoryMap.size > 0
-        ? Array.from(
+        const finalCategories = allowedCategoryMap.size > 0
+          ? Array.from(
             new Map(
               categoriesFromTests
                 .filter((name) => allowedCategoryMap.has(normalizeCategoryKey(name)))
                 .map((name) => [normalizeCategoryKey(name), allowedCategoryMap.get(normalizeCategoryKey(name)) || name])
             ).values()
           ).sort((a, b) => a.localeCompare(b))
-        : categoriesFromTests;
+          : categoriesFromTests;
 
-      setTestsMaster(normalizedTests);
-      setTestCategories(finalCategories);
+        setTestsMaster(normalizedTests);
+        setTestCategories(finalCategories);
       }
     } catch (err) {
       console.error(err);
@@ -1002,50 +1114,50 @@ const makeMedicineLookupKey = (medicineType, dosageForm, name) =>
   const allDiseases = [...cdDiseases, ...ncdDiseases];
 
   useEffect(() => {
-  const source =
-    diseaseData.Category === "Communicable"
-      ? cdDiseases
-      : ncdDiseases;
+    const source =
+      diseaseData.Category === "Communicable"
+        ? cdDiseases
+        : ncdDiseases;
 
-  // If no search term, show all diseases in alphabetical order
-  if (!diseaseSearch.trim()) {
-    const sorted = [...source].sort((a, b) => 
-      (a.name || "").localeCompare(b.name || "")
-    );
-    setFilteredDiseases(sorted); // Show all diseases, not just 5
-    return;
-  }
+    // If no search term, show all diseases in alphabetical order
+    if (!diseaseSearch.trim()) {
+      const sorted = [...source].sort((a, b) =>
+        (a.name || "").localeCompare(b.name || "")
+      );
+      setFilteredDiseases(sorted); // Show all diseases, not just 5
+      return;
+    }
 
-  // Otherwise filter based on search
-  const search = diseaseSearch.toLowerCase();
+    // Otherwise filter based on search
+    const search = diseaseSearch.toLowerCase();
 
-  const filtered = source.filter(d => {
-    return (
-      d.name?.toLowerCase().includes(search) ||
-      d.type?.toLowerCase().includes(search) ||
-      d.subgroup?.toLowerCase().includes(search)
-    );
-  });
+    const filtered = source.filter(d => {
+      return (
+        d.name?.toLowerCase().includes(search) ||
+        d.type?.toLowerCase().includes(search) ||
+        d.subgroup?.toLowerCase().includes(search)
+      );
+    });
 
-  setFilteredDiseases(filtered.slice(0, 20));
+    setFilteredDiseases(filtered.slice(0, 20));
 
-}, [diseaseSearch, cdDiseases, ncdDiseases, diseaseData.Category]);
+  }, [diseaseSearch, cdDiseases, ncdDiseases, diseaseData.Category]);
 
 
   /* ================= DISEASE FILTER ================= */
   const twoMonthsAgo = new Date();
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
 
-const relevantDiseases = diseases.filter((d) => {
-  if (formData.IsFamilyMember) {
-    return (
-      d.IsFamilyMember === true &&
-      String(d.FamilyMember_ID) === String(formData.FamilyMember_ID)
-    );
-  }
+  const relevantDiseases = diseases.filter((d) => {
+    if (formData.IsFamilyMember) {
+      return (
+        d.IsFamilyMember === true &&
+        String(d.FamilyMember_ID) === String(formData.FamilyMember_ID)
+      );
+    }
 
-  return d.IsFamilyMember === false;
-});
+    return d.IsFamilyMember === false;
+  });
 
   const communicableRecent = relevantDiseases.filter(
     (d) =>
@@ -1058,7 +1170,7 @@ const relevantDiseases = diseases.filter((d) => {
       ...prev,
       Medicines: [
         ...prev.Medicines,
-        { Medicine_Name: "", Medicine_Type: "", Dosage_Form: "", Type: "", FoodTiming: "", Strength: "", Morning: false, Afternoon: false, Night: false, Duration: "", Remarks: "", Quantity: 0, ToBePrescribed: false, toBePrescribed: false, IsToBePrescribed: false, _uid: `${Date.now()}-${Math.random().toString(36).slice(2,8)}` }
+        { Medicine_Name: "", Medicine_Type: "", Dosage_Form: "", Type: "", FoodTiming: "", Strength: "", Morning: false, Afternoon: false, Night: false, Duration: "", Remarks: "", Quantity: 0, ToBePrescribed: false, toBePrescribed: false, IsToBePrescribed: false, _uid: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
       ]
     }));
 
@@ -1122,7 +1234,7 @@ const relevantDiseases = diseases.filter((d) => {
       // }
 
       // Medicines are now optional - removed validation
-      
+
       const token = localStorage.getItem("instituteToken") || localStorage.getItem("token");
       await axios.post(`${BACKEND_URL}/doctor-prescription-api/add`, {
         Institute_ID: formData.Institute_ID,
@@ -1173,7 +1285,7 @@ const relevantDiseases = diseases.filter((d) => {
 
       alert("✅ Prescription saved successfully");
       setPrescriptionSuccessMessage("Prescription submitted successfully.");
-      
+
       // Reset all form fields
       setFormData({
         Institute_ID: formData.Institute_ID,
@@ -1184,21 +1296,21 @@ const relevantDiseases = diseases.filter((d) => {
         Notes: "",
         Disease_Name: ""
       });
-      
+
       setDiseaseData({
         Category: "Communicable",
         Disease_Name: "",
         Severity_Level: "Mild"
       });
-      
+
       setDiagnosisData({
         Tests: [{ Category: "", Test_ID: "", Test_Name: "" }]
       });
-      
+
       setXrayData({
         Xrays: [{ Body_Part: "", Xray_ID: "", Xray_Type: "" }]
       });
-      
+
       setSelectedEmployee(null);
       setLastTwoVisits([]);
       setSelectedVisit(null);
@@ -1212,10 +1324,10 @@ const relevantDiseases = diseases.filter((d) => {
       setFilteredDiseases([]);
       setSelectedType("");
       setSelectedSubgroup("");
-      
+
       // Reset PatientSelector component by changing key
       setPatientSelectorKey(prev => prev + 1);
-      
+
       if (notesTextareaRef.current) {
         notesTextareaRef.current.value = "";
       }
@@ -1516,21 +1628,21 @@ const relevantDiseases = diseases.filter((d) => {
 
         const mergedMedicines = doctorMedicines.length > 0
           ? doctorMedicines.map((doctorMedicine) => {
-              const pharmacyMatch = issuedMedicines.find((issuedMedicine) => {
-                const leftName = String(issuedMedicine?.Medicine_Name || "").trim().toLowerCase();
-                const rightName = String(doctorMedicine?.Medicine_Name || "").trim().toLowerCase();
-                const leftStrength = String(issuedMedicine?.Strength || "").trim().toLowerCase();
-                const rightStrength = String(doctorMedicine?.Strength || "").trim().toLowerCase();
+            const pharmacyMatch = issuedMedicines.find((issuedMedicine) => {
+              const leftName = String(issuedMedicine?.Medicine_Name || "").trim().toLowerCase();
+              const rightName = String(doctorMedicine?.Medicine_Name || "").trim().toLowerCase();
+              const leftStrength = String(issuedMedicine?.Strength || "").trim().toLowerCase();
+              const rightStrength = String(doctorMedicine?.Strength || "").trim().toLowerCase();
 
-                return leftName === rightName && (!leftStrength || !rightStrength || leftStrength === rightStrength);
-              });
+              return leftName === rightName && (!leftStrength || !rightStrength || leftStrength === rightStrength);
+            });
 
-              return {
-                ...doctorMedicine,
-                Quantity: pharmacyMatch?.Quantity || doctorMedicine?.Quantity || 0,
-                _source: pharmacyMatch ? "Pharmacy" : "Doctor"
-              };
-            })
+            return {
+              ...doctorMedicine,
+              Quantity: pharmacyMatch?.Quantity || doctorMedicine?.Quantity || 0,
+              _source: pharmacyMatch ? "Pharmacy" : "Doctor"
+            };
+          })
           : issuedMedicines;
 
         const relatedTests = (diagnosisAction?.data?.tests || []).map((test) => ({
@@ -1886,12 +1998,12 @@ const relevantDiseases = diseases.filter((d) => {
       }
     });
 
-  alert("✅ X-ray order saved");
+    alert("✅ X-ray order saved");
 
-  setXrayData({
-    Xrays: [{ Body_Part: "", Xray_ID: "", Xray_Type: "" }]
-  });
-};
+    setXrayData({
+      Xrays: [{ Body_Part: "", Xray_ID: "", Xray_Type: "" }]
+    });
+  };
 
 
   /* ================= UI ================= */
@@ -1934,320 +2046,319 @@ const relevantDiseases = diseases.filter((d) => {
                   ✕
                 </button>
               </div>
-                <div
-                  className="card-body"
-                  style={{ maxHeight: "70vh", overflowY: "auto" }}
-                >
-                  <h6 className="fw-bold text-dark mb-3">Previous Prescriptions</h6>
+              <div
+                className="card-body"
+                style={{ maxHeight: "70vh", overflowY: "auto" }}
+              >
+                <h6 className="fw-bold text-dark mb-3">Previous Prescriptions</h6>
 
-{(() => {
-  const previousPrescriptions = employeeReport?.previousPrescriptions || [];
+                {(() => {
+                  const previousPrescriptions = employeeReport?.previousPrescriptions || [];
 
-  return previousPrescriptions.length > 0 ? (
-    previousPrescriptions.map((prescription, index) =>
-      renderPrescriptionHistoryCard(prescription, `report-panel-${index}`)
-    )
-  ) : (
-    <div className="text-muted">No previous prescriptions available</div>
-  );
-})()}
+                  return previousPrescriptions.length > 0 ? (
+                    previousPrescriptions.map((prescription, index) =>
+                      renderPrescriptionHistoryCard(prescription, `report-panel-${index}`)
+                    )
+                  ) : (
+                    <div className="text-muted">No previous prescriptions available</div>
+                  );
+                })()}
 
-                  <hr className="my-4" />
+                <hr className="my-4" />
 
- <h6 className="fw-bold text-dark mb-3">Recent Tests</h6>
+                <h6 className="fw-bold text-dark mb-3">Recent Tests</h6>
 
-{(() => {
-  const diagnosisRecords = employeeReport?.diagnosisRecords || [];
-  const recentTests = diagnosisRecords
-    .flatMap(record =>
-      (record?.Tests || []).map((test, index) => ({
-        key: `${record._id}-${test.Test_ID?._id || test.Test_ID || index}`,
-        record,
-        test,
-        reportDate: test?.Timestamp || getDiagnosisReportDate(record)
-      }))
-    )
-    .sort(
-      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
-    )
-    .slice(0, 5);
+                {(() => {
+                  const diagnosisRecords = employeeReport?.diagnosisRecords || [];
+                  const recentTests = diagnosisRecords
+                    .flatMap(record =>
+                      (record?.Tests || []).map((test, index) => ({
+                        key: `${record._id}-${test.Test_ID?._id || test.Test_ID || index}`,
+                        record,
+                        test,
+                        reportDate: test?.Timestamp || getDiagnosisReportDate(record)
+                      }))
+                    )
+                    .sort(
+                      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
+                    )
+                    .slice(0, 5);
 
-  return recentTests.length > 0 ? (
-    recentTests.map(({ key, record, test, reportDate }) => {
-      const status = getReportStatus(test?.Result_Value);
-      const visitNotes = buildVisitNotes(record?.visitSummary);
+                  return recentTests.length > 0 ? (
+                    recentTests.map(({ key, record, test, reportDate }) => {
+                      const status = getReportStatus(test?.Result_Value);
+                      const visitNotes = buildVisitNotes(record?.visitSummary);
 
-      return (
-        <div key={key} className="border-bottom pb-2 mb-3">
-          <div className="d-flex justify-content-between align-items-start gap-2">
-            <div>
-              <div className="fw-semibold">
-                {test?.Test_Name || test?.Test_ID?.Test_Name || "Unknown Test"}
-              </div>
-              <small className="text-muted">
-                {formatDateDMY(reportDate)}
-              </small>
-            </div>
-            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
-              {status}
-            </span>
-          </div>
-
-          <div className="small mt-2">
-            Result: {status === "result out" ? `${test?.Result_Value || "-"} ${test?.Units || test?.Test_ID?.Units || ""}`.trim() : "Pending"}
-          </div>
-
-          {visitNotes && (
-            <div className="small text-muted mt-1">
-              Notes: {visitNotes}
-            </div>
-          )}
-
-          {test?.Reports && test.Reports.length > 0 ? (
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-primary mt-2 me-2 view-action"
-              onClick={() => setSelectedDiagnosisReport({ record, test })}
-            >
-              View Report
-            </button>
-          ) : (
-            <button
-              className="btn btn-sm btn-outline-secondary mt-2"
-              disabled
-            >
-              No Report
-            </button>
-          )}
-        </div>
-      );
-    })
-  ) : (
-    <div className="text-muted">No tests available</div>
-  );
-})()}
-
-                  <hr className="my-4" />
-
-                  <h6 className="fw-bold text-dark mb-3">Recent X-rays</h6>
-
-{(() => {
-  const xrayRecords = employeeReport?.xrayRecords || [];
-  const recentXrays = xrayRecords
-    .flatMap(record =>
-      (record?.Xrays || []).map((xray, index) => ({
-        key: `${record._id}-${xray.Xray_ID || xray.Xray_Type || index}`,
-        record,
-        xray,
-        reportDate: xray?.Timestamp || getXrayReportDate(record)
-      }))
-    )
-    .sort(
-      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
-    )
-    .filter(({ xray }) => {
-      // only show xrays where results are out
-      const status = xray?.Findings || xray?.Impression || xray?.Remarks ? "result out" : "pending";
-      return status === "result out";
-    })
-    .slice(0, 5);
-
-  return recentXrays.length > 0 ? (
-    recentXrays.map(({ key, record, xray, reportDate }) => {
-      const status =
-        xray?.Findings || xray?.Impression || xray?.Remarks
-          ? "result out"
-          : "pending";
-
-      return (
-        <div key={key} className="border-bottom pb-2 mb-3">
-          <div className="d-flex justify-content-between align-items-start gap-2">
-            <div>
-              <div className="fw-semibold">
-                {xray?.Xray_Type || "X-ray"}
-              </div>
-              <small className="text-muted">
-                {formatDateDMY(reportDate)}
-              </small>
-            </div>
-            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
-              {status}
-            </span>
-          </div>
-
-          <div className="small mt-2">
-            {xray?.Body_Part || "Body part not available"}
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary mt-2 view-action"
-            disabled={status !== "result out"}
-            onClick={() => setSelectedXrayReport({ record, xray })}
-          >
-            View
-          </button>
-        </div>
-      );
-    })
-  ) : (
-    <div className="text-muted">No X-rays available</div>
-  );
-})()}
-
-                  <hr className="my-4" />
-
-                  <h6 className="fw-bold text-dark mb-3">Diseases</h6>
-
-                  {(() => {
-                    const allDiseases = employeeReport?.diseases || [];
-
-                    const twoWeeksAgo = new Date();
-                    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-
-                    const nonCommunicable = allDiseases.filter(
-                      d => d.Category === "Non-Communicable"
-                    );
-
-                    const communicableRecent = allDiseases.filter(
-                      d =>
-                        d.Category === "Communicable" &&
-                        new Date(d.createdAt) >= twoWeeksAgo
-                    );
-
-                    return (
-                      <>
-                        {nonCommunicable.map((d, index) => (
-                          <div key={`nc-${index}`} className="border-bottom pb-2 mb-2">
-                            <div className="fw-semibold text-secondary">
-                              {d.Disease_Name}
-                            </div>
-                            <small className="text-muted">
-                              {new Date(d.createdAt).toLocaleDateString("en-GB")}
-                            </small>
+                      return (
+                        <div key={key} className="border-bottom pb-2 mb-3">
+                          <div className="d-flex justify-content-between align-items-start gap-2">
                             <div>
-                              <span className="badge bg-info mt-1">
-                                {d.Severity_Level}
-                              </span>
+                              <div className="fw-semibold">
+                                {test?.Test_Name || test?.Test_ID?.Test_Name || "Unknown Test"}
+                              </div>
+                              <small className="text-muted">
+                                {formatDateDMY(reportDate)}
+                              </small>
                             </div>
+                            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
+                              {status}
+                            </span>
                           </div>
-                        ))}
 
-                        {communicableRecent.map((d, index) => (
-                          <div key={`c-${index}`} className="border-bottom pb-2 mb-2">
-                            <div className="fw-semibold text-danger">
-                              {d.Disease_Name}
-                            </div>
-                            <small className="text-muted">
-                              {new Date(d.createdAt).toLocaleDateString("en-GB")}
-                            </small>
-                            <div>
-                              <span className="badge bg-danger mt-1">
-                                {d.Severity_Level}
-                              </span>
-                            </div>
+                          <div className="small mt-2">
+                            Result: {status === "result out" ? `${test?.Result_Value || "-"} ${test?.Units || test?.Test_ID?.Units || ""}`.trim() : "Pending"}
                           </div>
-                        ))}
-                      </>
-                    );
-                  })()}
-                </div>
+
+                          {visitNotes && (
+                            <div className="small text-muted mt-1">
+                              Notes: {visitNotes}
+                            </div>
+                          )}
+
+                          {test?.Reports && test.Reports.length > 0 ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-primary mt-2 me-2 view-action"
+                              onClick={() => setSelectedDiagnosisReport({ record, test })}
+                            >
+                              View Report
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-sm btn-outline-secondary mt-2"
+                              disabled
+                            >
+                              No Report
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-muted">No tests available</div>
+                  );
+                })()}
+
+                <hr className="my-4" />
+
+                <h6 className="fw-bold text-dark mb-3">Recent X-rays</h6>
+
+                {(() => {
+                  const xrayRecords = employeeReport?.xrayRecords || [];
+                  const recentXrays = xrayRecords
+                    .flatMap(record =>
+                      (record?.Xrays || []).map((xray, index) => ({
+                        key: `${record._id}-${xray.Xray_ID || xray.Xray_Type || index}`,
+                        record,
+                        xray,
+                        reportDate: xray?.Timestamp || getXrayReportDate(record)
+                      }))
+                    )
+                    .sort(
+                      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
+                    )
+                    .filter(({ xray }) => {
+                      // only show xrays where results are out
+                      const status = xray?.Findings || xray?.Impression || xray?.Remarks ? "result out" : "pending";
+                      return status === "result out";
+                    })
+                    .slice(0, 5);
+
+                  return recentXrays.length > 0 ? (
+                    recentXrays.map(({ key, record, xray, reportDate }) => {
+                      const status =
+                        xray?.Findings || xray?.Impression || xray?.Remarks
+                          ? "result out"
+                          : "pending";
+
+                      return (
+                        <div key={key} className="border-bottom pb-2 mb-3">
+                          <div className="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                              <div className="fw-semibold">
+                                {xray?.Xray_Type || "X-ray"}
+                              </div>
+                              <small className="text-muted">
+                                {formatDateDMY(reportDate)}
+                              </small>
+                            </div>
+                            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
+                              {status}
+                            </span>
+                          </div>
+
+                          <div className="small mt-2">
+                            {xray?.Body_Part || "Body part not available"}
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary mt-2 view-action"
+                            disabled={status !== "result out"}
+                            onClick={() => setSelectedXrayReport({ record, xray })}
+                          >
+                            View
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-muted">No X-rays available</div>
+                  );
+                })()}
+
+                <hr className="my-4" />
+
+                <h6 className="fw-bold text-dark mb-3">Diseases</h6>
+
+                {(() => {
+                  const allDiseases = employeeReport?.diseases || [];
+
+                  const twoWeeksAgo = new Date();
+                  twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+                  const nonCommunicable = allDiseases.filter(
+                    d => d.Category === "Non-Communicable"
+                  );
+
+                  const communicableRecent = allDiseases.filter(
+                    d =>
+                      d.Category === "Communicable" &&
+                      new Date(d.createdAt) >= twoWeeksAgo
+                  );
+
+                  return (
+                    <>
+                      {nonCommunicable.map((d, index) => (
+                        <div key={`nc-${index}`} className="border-bottom pb-2 mb-2">
+                          <div className="fw-semibold text-secondary">
+                            {d.Disease_Name}
+                          </div>
+                          <small className="text-muted">
+                            {new Date(d.createdAt).toLocaleDateString("en-GB")}
+                          </small>
+                          <div>
+                            <span className="badge bg-info mt-1">
+                              {d.Severity_Level}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {communicableRecent.map((d, index) => (
+                        <div key={`c-${index}`} className="border-bottom pb-2 mb-2">
+                          <div className="fw-semibold text-danger">
+                            {d.Disease_Name}
+                          </div>
+                          <small className="text-muted">
+                            {new Date(d.createdAt).toLocaleDateString("en-GB")}
+                          </small>
+                          <div>
+                            <span className="badge bg-danger mt-1">
+                              {d.Severity_Level}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
+              </div>
 
             </div>
           </div>
         )}
 
-          {/* X-ray single-item modal */}
-          {selectedXrayReport && (
-            <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)", zIndex: 2050 }}>
-              <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ zIndex: 2060, maxWidth: '90%' }}>
-                <div className="modal-content">
-                  <div className="modal-header bg-primary text-white">
-                    <h5 className="modal-title">X‑ray Detail</h5>
-                    <button className="btn-close btn-close-white" onClick={() => setSelectedXrayReport(null)} />
-                  </div>
+        {/* X-ray single-item modal */}
+        {selectedXrayReport && (
+          <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)", zIndex: 2050 }}>
+            <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ zIndex: 2060, maxWidth: '90%' }}>
+              <div className="modal-content">
+                <div className="modal-header bg-primary text-white">
+                  <h5 className="modal-title">X‑ray Detail</h5>
+                  <button className="btn-close btn-close-white" onClick={() => setSelectedXrayReport(null)} />
+                </div>
 
-                  <div className="modal-body p-0">
-                    <div className="d-flex justify-content-center p-3 overflow-auto">
-                      <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
-                    </div>
+                <div className="modal-body p-0">
+                  <div className="d-flex justify-content-center p-3 overflow-auto">
+                    <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
                   </div>
+                </div>
 
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-outline-primary"
-                  onClick={() => openXrayImageView(selectedXrayReport)}
-                  disabled={!getXrayImageUrl(selectedXrayReport)}
-                >
-                  View Image
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => downloadXrayReport(selectedXrayReport)}
-                  disabled={downloadingXrayId === getXrayDownloadId(selectedXrayReport)}
-                >
-                  {downloadingXrayId === getXrayDownloadId(selectedXrayReport) ? "Preparing..." : "Download Report"}
-                </button>
-                <button className="btn btn-outline-primary" onClick={() => setSelectedXrayReport(null)}>Close</button>
-              </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary"
+                    onClick={() => openXrayImageView(selectedXrayReport)}
+                    disabled={!getXrayImageUrl(selectedXrayReport)}
+                  >
+                    View Image
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => downloadXrayReport(selectedXrayReport)}
+                    disabled={downloadingXrayId === getXrayDownloadId(selectedXrayReport)}
+                  >
+                    {downloadingXrayId === getXrayDownloadId(selectedXrayReport) ? "Preparing..." : "Download Report"}
+                  </button>
+                  <button className="btn btn-outline-primary" onClick={() => setSelectedXrayReport(null)}>Close</button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {selectedPrescriptionReport && (
-        <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)", zIndex: 2050 }}>
-          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ zIndex: 2060 }}>
-            <div className="modal-content">
-              <div className="modal-header bg-dark text-white d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center gap-2">
-                      <h5 className="modal-title mb-0">Prescription Report</h5>
-                    </div>
-
-                    <button
-                      type="button"
-                      className="btn-close btn-close-white"
-                      onClick={() => { setSelectedPrescriptionReport(null); }}
-                    />
+        {selectedPrescriptionReport && (
+          <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)", zIndex: 2050 }}>
+            <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ zIndex: 2060 }}>
+              <div className="modal-content">
+                <div className="modal-header bg-dark text-white d-flex justify-content-between align-items-center">
+                  <div className="d-flex align-items-center gap-2">
+                    <h5 className="modal-title mb-0">Prescription Report</h5>
                   </div>
 
-                  <div className="modal-body p-0">
-                    <div className="d-flex justify-content-center p-3 overflow-auto">
-                      <SARCPLPrescriptionReport reportData={buildPrescriptionPreviewData(selectedPrescriptionReport)} panels={diagnosticPanels} />
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    className="btn-close btn-close-white"
+                    onClick={() => { setSelectedPrescriptionReport(null); }}
+                  />
+                </div>
 
-                  <div className="modal-footer">
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => downloadPrescriptionReport(selectedPrescriptionReport)}
-                      disabled={downloadingPrescriptionId === getPrescriptionDownloadId(selectedPrescriptionReport)}
-                    >
-                      {downloadingPrescriptionId === getPrescriptionDownloadId(selectedPrescriptionReport) ? "Preparing..." : "Download Report"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary"
-                      onClick={() => setSelectedPrescriptionReport(null)}
-                    >
-                      Close
-                    </button>
+                <div className="modal-body p-0">
+                  <div className="d-flex justify-content-center p-3 overflow-auto">
+                    <SARCPLPrescriptionReport reportData={buildPrescriptionPreviewData(selectedPrescriptionReport)} panels={diagnosticPanels} />
                   </div>
+                </div>
+
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => downloadPrescriptionReport(selectedPrescriptionReport)}
+                    disabled={downloadingPrescriptionId === getPrescriptionDownloadId(selectedPrescriptionReport)}
+                  >
+                    {downloadingPrescriptionId === getPrescriptionDownloadId(selectedPrescriptionReport) ? "Preparing..." : "Download Report"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary"
+                    onClick={() => setSelectedPrescriptionReport(null)}
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
         {/* FORM */}
         <div
-            className={`mb-3 ${
-              showReports ? "col-lg-6" : "col-lg-9"
+          className={`mb-3 ${showReports ? "col-lg-6" : "col-lg-9"
             }`}
-            style={{ transition: "all 0.4s ease" }}
-          >
+          style={{ transition: "all 0.4s ease" }}
+        >
 
           <div className="card shadow border-0">
             <div className="card-header bg-dark text-white">
@@ -2303,10 +2414,10 @@ const relevantDiseases = diseases.filter((d) => {
                       // Fetch all medical actions for this employee
                       const actionsRes = await axios.get(`${BACKEND_URL}/api/medical-actions/employee/${employee._id}`);
                       const actions = actionsRes.data || [];
-                      
+
                       // Filter to get prescriptions for this specific visit
-                      const existingPrescription = actions.find(action => 
-                        action.action_type === "DOCTOR_PRESCRIPTION" && 
+                      const existingPrescription = actions.find(action =>
+                        action.action_type === "DOCTOR_PRESCRIPTION" &&
                         action.visit_id === visit?._id &&
                         (isFamily ? action.data?.FamilyMember_ID === familyId : !action.data?.FamilyMember_ID)
                       );
@@ -2314,27 +2425,27 @@ const relevantDiseases = diseases.filter((d) => {
                       if (existingPrescription && existingPrescription.data) {
                         // Pre-fill form with existing prescription data
                         const prescriptionData = existingPrescription.data;
-                        
+
                         setFormData(prev => ({
                           ...prev,
                           Medicines: prescriptionData.medicines && prescriptionData.medicines.length > 0
                             ? prescriptionData.medicines.map(med => ({
-                                Medicine_Name: med.Medicine_Name || "",
-                                Medicine_Type: med.Medicine_Type || med.Type || "",
-                                Dosage_Form: med.Dosage_Form || "",
-                                Type: med.Medicine_Type || med.Type || "",
-                                FoodTiming: med.FoodTiming || "",
-                                Strength: med.Strength || "",
-                                Morning: med.Morning || false,
-                                Afternoon: med.Afternoon || false,
-                                Night: med.Night || false,
-                                Duration: med.Duration || "",
-                                Remarks: med.Remarks || "",
-                                Quantity: med.Quantity || 0,
-                                ToBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false,
-                                toBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false,
-                                IsToBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false
-                              }))
+                              Medicine_Name: med.Medicine_Name || "",
+                              Medicine_Type: med.Medicine_Type || med.Type || "",
+                              Dosage_Form: med.Dosage_Form || "",
+                              Type: med.Medicine_Type || med.Type || "",
+                              FoodTiming: med.FoodTiming || "",
+                              Strength: med.Strength || "",
+                              Morning: med.Morning || false,
+                              Afternoon: med.Afternoon || false,
+                              Night: med.Night || false,
+                              Duration: med.Duration || "",
+                              Remarks: med.Remarks || "",
+                              Quantity: med.Quantity || 0,
+                              ToBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false,
+                              toBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false,
+                              IsToBePrescribed: med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false
+                            }))
                             : [{ Medicine_Name: "", Medicine_Type: "", Dosage_Form: "", Type: "", FoodTiming: "", Strength: "", Morning: false, Afternoon: false, Night: false, Duration: "", Remarks: "", Quantity: 0, ToBePrescribed: false, toBePrescribed: false, IsToBePrescribed: false }],
                           Notes: prescriptionData.notes || prev.Notes
                         }));
@@ -2381,120 +2492,120 @@ const relevantDiseases = diseases.filter((d) => {
 
                 <h6 className="fw-bold" style={{ marginTop: "20px" }}>Disease</h6>
 
-<div className="row g-3 mt-2">
+                <div className="row g-3 mt-2">
 
-  {/* Category */}
-  <div className="col-md-4">
-    <label className="form-label fw-semibold">Category</label>
-    <select
-      className="form-select"
-      value={diseaseData.Category}
-      onChange={(e) => {
-        setDiseaseData(prev => ({
-          ...prev,
-          Category: e.target.value,
-          Disease_Name: ""
-        }));
-        setShowOtherDiseaseInput(false);
-      }}
-    >
-      {diseaseCategoryOptions.map((item) => (
-        <option key={item} value={item}>{item}</option>
-      ))}
-    </select>
-  </div>
+                  {/* Category */}
+                  <div className="col-md-4">
+                    <label className="form-label fw-semibold">Category</label>
+                    <select
+                      className="form-select"
+                      value={diseaseData.Category}
+                      onChange={(e) => {
+                        setDiseaseData(prev => ({
+                          ...prev,
+                          Category: e.target.value,
+                          Disease_Name: ""
+                        }));
+                        setShowOtherDiseaseInput(false);
+                      }}
+                    >
+                      {diseaseCategoryOptions.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
 
-  {/* Disease Name */}
-  <div className="col-md-4">
-  <label className="form-label fw-semibold">Disease Name</label>
+                  {/* Disease Name */}
+                  <div className="col-md-4">
+                    <label className="form-label fw-semibold">Disease Name</label>
 
-  <div className="position-relative">
+                    <div className="position-relative">
 
-    {/* ✅ INPUT FIELD (YOU MISSED THIS) */}
-    <input
-      type="text"
-      className="form-control"
-      placeholder="Search disease..."
-      value={diseaseSearch}
-      onChange={(e) => {
-        setDiseaseSearch(e.target.value);
-      }}
-      onFocus={() => setShowDiseaseDropdown(true)}
-      onBlur={() => {
-        // Delay hiding to allow click on dropdown items
-        setTimeout(() => setShowDiseaseDropdown(false), 200);
-      }}
-    />
+                      {/* ✅ INPUT FIELD (YOU MISSED THIS) */}
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Search disease..."
+                        value={diseaseSearch}
+                        onChange={(e) => {
+                          setDiseaseSearch(e.target.value);
+                        }}
+                        onFocus={() => setShowDiseaseDropdown(true)}
+                        onBlur={() => {
+                          // Delay hiding to allow click on dropdown items
+                          setTimeout(() => setShowDiseaseDropdown(false), 200);
+                        }}
+                      />
 
-    {/* ✅ SUGGESTIONS */}
-    {showDiseaseDropdown && filteredDiseases.length > 0 && (
-      <ul
-        className="list-group position-absolute w-100"
-        style={{ zIndex: 1000, maxHeight: "200px", overflowY: "auto" }}
-      >
-        {filteredDiseases.map((d, i) => (
-          <li
-            key={i}
-            className="list-group-item list-group-item-action"
-            style={{ cursor: "pointer" }}
-            onClick={() => {
-              setDiseaseSearch(d.name);
-              setDiseaseData(prev => ({
-                ...prev,
-                Disease_Name: d.name
-              }));
-              setFilteredDiseases([]);
-              setShowDiseaseDropdown(false);
-            }}
-          >
-            {/* 🔥 FINAL FORMAT */}
-            {d.subgroup
-              ? `${d.type} - ${d.subgroup} - ${d.name}`
-              : `${d.type} - ${d.name}`}
-          </li>
-        ))}
-      </ul>
-    )}
+                      {/* ✅ SUGGESTIONS */}
+                      {showDiseaseDropdown && filteredDiseases.length > 0 && (
+                        <ul
+                          className="list-group position-absolute w-100"
+                          style={{ zIndex: 1000, maxHeight: "200px", overflowY: "auto" }}
+                        >
+                          {filteredDiseases.map((d, i) => (
+                            <li
+                              key={i}
+                              className="list-group-item list-group-item-action"
+                              style={{ cursor: "pointer" }}
+                              onClick={() => {
+                                setDiseaseSearch(d.name);
+                                setDiseaseData(prev => ({
+                                  ...prev,
+                                  Disease_Name: d.name
+                                }));
+                                setFilteredDiseases([]);
+                                setShowDiseaseDropdown(false);
+                              }}
+                            >
+                              {/* 🔥 FINAL FORMAT */}
+                              {d.subgroup
+                                ? `${d.type} - ${d.subgroup} - ${d.name}`
+                                : `${d.type} - ${d.name}`}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
 
-  </div>
-</div>
+                    </div>
+                  </div>
 
-  {/* Severity */}
-  <div className="col-md-4">
-    <label className="form-label fw-semibold">Severity</label>
-    <select
-      className="form-select"
-      value={diseaseData.Severity_Level}
-      onChange={(e) =>
-        setDiseaseData(prev => ({
-          ...prev,
-          Severity_Level: e.target.value
-        }))
-      }
-    >
-      {effectiveDiseaseSeverityOptions.map((item) => (
-        <option key={item} value={item}>{item}</option>
-      ))}
-    </select>
-  </div>
-</div>
+                  {/* Severity */}
+                  <div className="col-md-4">
+                    <label className="form-label fw-semibold">Severity</label>
+                    <select
+                      className="form-select"
+                      value={diseaseData.Severity_Level}
+                      onChange={(e) =>
+                        setDiseaseData(prev => ({
+                          ...prev,
+                          Severity_Level: e.target.value
+                        }))
+                      }
+                    >
+                      {effectiveDiseaseSeverityOptions.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-{/* Other Disease Input */}
-{showOtherDiseaseInput && (
-  <div className="mt-3">
-    <input
-      className="form-control"
-      placeholder="Enter disease name"
-      value={diseaseData.Disease_Name}
-      onChange={(e) =>
-        setDiseaseData(prev => ({
-          ...prev,
-          Disease_Name: e.target.value
-        }))
-      }
-    />
-  </div>
-)}
+                {/* Other Disease Input */}
+                {showOtherDiseaseInput && (
+                  <div className="mt-3">
+                    <input
+                      className="form-control"
+                      placeholder="Enter disease name"
+                      value={diseaseData.Disease_Name}
+                      onChange={(e) =>
+                        setDiseaseData(prev => ({
+                          ...prev,
+                          Disease_Name: e.target.value
+                        }))
+                      }
+                    />
+                  </div>
+                )}
 
                 <div className="row g-3 mt-3">
                   <div className="col-md-6">
@@ -2530,291 +2641,366 @@ const relevantDiseases = diseases.filter((d) => {
                 <h6 className="fw-bold mt-4">Medicines</h6>
 
                 {formData.Medicines.map((med, i) => (
-      <div key={med._uid || i} className="mb-4 border rounded p-3 bg-light">
-        {/* First Row: Medicine Selection */}
-        <div className="row g-2 align-items-end mb-3">
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">To Be Prescribed</label>
-            <div className="form-check d-flex align-items-center h-100">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id={`toBePrescribed-${i}`}
-                checked={med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false}
-                onChange={(e) => {
-                  const copy = [...formData.Medicines];
-                  copy[i].ToBePrescribed = e.target.checked;
-                  copy[i].toBePrescribed = e.target.checked;
-                  copy[i].IsToBePrescribed = e.target.checked;
-                  setFormData(prev => ({ ...prev, Medicines: copy }));
-                }}
-              />
-              <label className="form-check-label ms-2" htmlFor={`toBePrescribed-${i}`}>
-                Yes
-              </label>
-            </div>
-          </div>
+                  <div key={med._uid || i} className="mb-4 border rounded p-3 bg-light">
+                    {!med.ToBePrescribed && (
+                      <div className="mb-3 position-relative" ref={(el) => { quickMedicineSearchRefs.current[i] = el; }}>
+                        <label className="form-label fw-semibold">Quick Medicine Search</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="Search medicine by name"
+                          value={quickMedicineSearches[i] ?? ""}
+                          onFocus={() => {
+                            setQuickMedicineSearchOpen((prev) => {
+                              const next = [...prev];
+                              next[i] = true;
+                              return next;
+                            });
+                          }}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setQuickMedicineSearches((prev) => {
+                              const next = [...prev];
+                              next[i] = value;
+                              return next;
+                            });
+                            setQuickMedicineSearchOpen((prev) => {
+                              const next = [...prev];
+                              next[i] = true;
+                              return next;
+                            });
+                            if (!value.trim()) {
+                              resetMedicineRow(i);
+                            }
+                          }}
+                        />
 
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Medicine Type</label>
-            <select
-              className="form-select"
-              value={med.Medicine_Type}
-              disabled={med.ToBePrescribed}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].Medicine_Type = e.target.value;
-                copy[i].Type = e.target.value;
-                copy[i].Dosage_Form = "";
-                const allowedMedicines = getMedicineOptionsByType(copy[i].Medicine_Type, copy[i].Dosage_Form);
-                if (!allowedMedicines.includes(copy[i].Medicine_Name)) {
-                  copy[i].Medicine_Name = "";
-                  copy[i].Strength = "";
-                }
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            >
-              <option value="">
-                {med.ToBePrescribed ? "Disabled (Manual Entry)" : "Select Type"}
-              </option>
-              {medicineTypeOptions.map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-          </div>
+                        {quickMedicineSearchOpen[i] && (
+                          <div className="border rounded bg-white shadow-sm mt-1 position-relative" style={{ maxHeight: "220px", overflowY: "auto", zIndex: 15 }}>
+                            {getQuickMedicineOptionsForRow(i).length > 0 ? (
+                              getQuickMedicineOptionsForRow(i).map((item, optionIndex) => {
+                                const isSelected =
+                                  normalizeSearchText(item.Medicine_Name || item.value_name) === normalizeSearchText(formData.Medicines[i]?.Medicine_Name) &&
+                                  normalizeSearchText(item.Medicine_Type || item.medicineType) === normalizeSearchText(formData.Medicines[i]?.Medicine_Type || formData.Medicines[i]?.Type) &&
+                                  normalizeSearchText(item.Dosage_Form || item.dosageForm) === normalizeSearchText(formData.Medicines[i]?.Dosage_Form) &&
+                                  normalizeSearchText(item.Strength || item.strength) === normalizeSearchText(formData.Medicines[i]?.Strength);
 
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Dosage Form</label>
-            <select
-              className="form-select"
-              value={med.Dosage_Form}
-              disabled={!med.Medicine_Type || med.ToBePrescribed}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].Dosage_Form = e.target.value;
-                const allowedMedicines = getMedicineOptionsByType(copy[i].Medicine_Type, copy[i].Dosage_Form);
-                if (!allowedMedicines.includes(copy[i].Medicine_Name)) {
-                  copy[i].Medicine_Name = "";
-                  copy[i].Strength = "";
-                }
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            >
-              <option value="">
-                {med.ToBePrescribed
-                  ? "Disabled (Manual Entry)"
-                  : med.Medicine_Type
-                    ? "Select Dosage Form"
-                    : "Select Medicine Type First"
-                }
-              </option>
-              {dosageFormOptions.map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-          </div>
+                                return (
+                                  <button
+                                    key={`${item.Medicine_Name || item.value_name || optionIndex}-${item.Strength || item.strength || "no-strength"}-${item.Dosage_Form || item.dosageForm || "no-form"}-${item.Medicine_Type || item.medicineType || "no-type"}`}
+                                    type="button"
+                                    className={`d-block text-start w-100 border-0 px-3 py-2 ${isSelected ? "bg-primary text-white" : "bg-white"}`}
+                                    style={{ borderBottom: optionIndex < getQuickMedicineOptionsForRow(i).length - 1 ? "1px solid #f1f1f1" : "none" }}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => applyQuickMedicineSelection(i, item)}
+                                  >
+                                    <div className="fw-semibold fs-6">{item.Medicine_Name || item.value_name || "Unnamed medicine"}</div>
+                                    <div className="small mt-1 d-flex flex-wrap gap-2 align-items-center">
+                                      <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                        {item.Strength || item.strength || "No strength"}
+                                      </span>
+                                      <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                        {item.Dosage_Form || item.dosageForm || "No dosage form"}
+                                      </span>
+                                      <span className={`rounded-pill px-2 py-1 ${isSelected ? "bg-white text-primary" : "bg-light text-dark"}`}>
+                                        {item.Medicine_Type || item.medicineType || "No type"}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <div className="px-3 py-2 text-muted small">No medicines found.</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Medicine</label>
-            {med.ToBePrescribed ? (
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Type medicine name"
-                value={med.Medicine_Name}
-                onChange={(e) => {
-                  const copy = [...formData.Medicines];
-                  copy[i].Medicine_Name = e.target.value;
-                  setFormData(prev => ({ ...prev, Medicines: copy }));
-                }}
-              />
-            ) : (
-              <select
-                className="form-select"
-                value={med.Medicine_Name}
-                disabled={!med.Medicine_Type}
-                onChange={(e) => {
-                  const copy = [...formData.Medicines];
-                  copy[i].Medicine_Name = e.target.value;
-                  if (!getStrengthOptions(e.target.value, copy[i].Medicine_Type, copy[i].Dosage_Form).includes(copy[i].Strength)) {
-                    copy[i].Strength = "";
-                  }
-                  setFormData(prev => ({ ...prev, Medicines: copy }));
-                }}
-              >
-                <option value="">{med.Medicine_Type ? "Select Medicine" : "Select Medicine Type First"}</option>
-                {getMedicineOptionsByType(med.Medicine_Type, med.Dosage_Form).map((name) => (
-                  <option key={name} value={name}>{name}</option>
+                    {/* First Row: Medicine Selection */}
+                    <div className="row g-2 align-items-end mb-3">
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">To Be Prescribed</label>
+                        <div className="form-check d-flex align-items-center h-100">
+                          <input
+                            type="checkbox"
+                            className="form-check-input"
+                            id={`toBePrescribed-${i}`}
+                            checked={med.ToBePrescribed || med.toBePrescribed || med.IsToBePrescribed || false}
+                            onChange={(e) => {
+                              const copy = [...formData.Medicines];
+                              copy[i].ToBePrescribed = e.target.checked;
+                              copy[i].toBePrescribed = e.target.checked;
+                              copy[i].IsToBePrescribed = e.target.checked;
+                              setFormData(prev => ({ ...prev, Medicines: copy }));
+                            }}
+                          />
+                          <label className="form-check-label ms-2" htmlFor={`toBePrescribed-${i}`}>
+                            Yes
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Medicine Type</label>
+                        <select
+                          className="form-select"
+                          value={med.Medicine_Type}
+                          disabled={med.ToBePrescribed}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].Medicine_Type = e.target.value;
+                            copy[i].Type = e.target.value;
+                            copy[i].Dosage_Form = "";
+                            const allowedMedicines = getMedicineOptionsByType(copy[i].Medicine_Type, copy[i].Dosage_Form);
+                            if (!allowedMedicines.includes(copy[i].Medicine_Name)) {
+                              copy[i].Medicine_Name = "";
+                              copy[i].Strength = "";
+                            }
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        >
+                          <option value="">
+                            {med.ToBePrescribed ? "Disabled (Manual Entry)" : "Select Type"}
+                          </option>
+                          {medicineTypeOptions.map((item) => (
+                            <option key={item} value={item}>{item}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Dosage Form</label>
+                        <select
+                          className="form-select"
+                          value={med.Dosage_Form}
+                          disabled={!med.Medicine_Type || med.ToBePrescribed}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].Dosage_Form = e.target.value;
+                            const allowedMedicines = getMedicineOptionsByType(copy[i].Medicine_Type, copy[i].Dosage_Form);
+                            if (!allowedMedicines.includes(copy[i].Medicine_Name)) {
+                              copy[i].Medicine_Name = "";
+                              copy[i].Strength = "";
+                            }
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        >
+                          <option value="">
+                            {med.ToBePrescribed
+                              ? "Disabled (Manual Entry)"
+                              : med.Medicine_Type
+                                ? "Select Dosage Form"
+                                : "Select Medicine Type First"
+                            }
+                          </option>
+                          {dosageFormOptions.map((item) => (
+                            <option key={item} value={item}>{item}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Medicine</label>
+                        {med.ToBePrescribed ? (
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Type medicine name"
+                            value={med.Medicine_Name}
+                            onChange={(e) => {
+                              const copy = [...formData.Medicines];
+                              copy[i].Medicine_Name = e.target.value;
+                              setFormData(prev => ({ ...prev, Medicines: copy }));
+                            }}
+                          />
+                        ) : (
+                          <select
+                            className="form-select"
+                            value={med.Medicine_Name}
+                            disabled={!med.Medicine_Type}
+                            onChange={(e) => {
+                              const copy = [...formData.Medicines];
+                              copy[i].Medicine_Name = e.target.value;
+                              if (!getStrengthOptions(e.target.value, copy[i].Medicine_Type, copy[i].Dosage_Form).includes(copy[i].Strength)) {
+                                copy[i].Strength = "";
+                              }
+                              setFormData(prev => ({ ...prev, Medicines: copy }));
+                            }}
+                          >
+                            <option value="">{med.Medicine_Type ? "Select Medicine" : "Select Medicine Type First"}</option>
+                            {getMedicineOptionsByType(med.Medicine_Type, med.Dosage_Form).map((name) => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Food Timing</label>
+                        <select
+                          className="form-select"
+                          value={med.FoodTiming}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].FoodTiming = e.target.value;
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        >
+                          <option value="">Select Timing</option>
+                          {foodTimingOptions.map((item) => (
+                            <option key={item} value={item}>{item}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Strength</label>
+                        {med.ToBePrescribed ? (
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="e.g., 500mg, 5ml"
+                            value={med.Strength || ""}
+                            onChange={(e) => {
+                              const copy = [...formData.Medicines];
+                              copy[i].Strength = e.target.value;
+                              setFormData(prev => ({ ...prev, Medicines: copy }));
+                            }}
+                          />
+                        ) : (
+                          <select
+                            className="form-select"
+                            value={med.Strength || ""}
+                            disabled={!med.Medicine_Name}
+                            onChange={(e) => {
+                              const copy = [...formData.Medicines];
+                              copy[i].Strength = e.target.value;
+                              setFormData(prev => ({ ...prev, Medicines: copy }));
+                            }}
+                          >
+                            <option value="">
+                              {getStrengthOptions(med.Medicine_Name, med.Medicine_Type, med.Dosage_Form).length > 0
+                                ? "Select Strength"
+                                : "Not specified"}
+                            </option>
+                            {getStrengthOptions(med.Medicine_Name, med.Medicine_Type, med.Dosage_Form).map((strength, idx) => (
+                              <option key={`${med._uid || i}-str-${idx}`} value={strength}>
+                                {strength}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Second Row: Dosage Details */}
+                    <div className="row g-2 align-items-end">
+                      <div className="col-md-4">
+                        <label className="form-label fw-semibold">Dosage Times</label>
+                        <div className="d-flex gap-3 mt-2">
+                          <div className="form-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              id={`morning-${i}`}
+                              checked={med.Morning}
+                              onChange={(e) => {
+                                const copy = [...formData.Medicines];
+                                copy[i].Morning = e.target.checked;
+                                copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
+                                setFormData(prev => ({ ...prev, Medicines: copy }));
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`morning-${i}`}>
+                              Morning
+                            </label>
+                          </div>
+                          <div className="form-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              id={`afternoon-${i}`}
+                              checked={med.Afternoon}
+                              onChange={(e) => {
+                                const copy = [...formData.Medicines];
+                                copy[i].Afternoon = e.target.checked;
+                                copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
+                                setFormData(prev => ({ ...prev, Medicines: copy }));
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`afternoon-${i}`}>
+                              Afternoon
+                            </label>
+                          </div>
+                          <div className="form-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              id={`night-${i}`}
+                              checked={med.Night}
+                              onChange={(e) => {
+                                const copy = [...formData.Medicines];
+                                copy[i].Night = e.target.checked;
+                                copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
+                                setFormData(prev => ({ ...prev, Medicines: copy }));
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`night-${i}`}>
+                              Night
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="col-md-2">
+                        <label className="form-label fw-semibold">Duration</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="5 days"
+                          value={med.Duration}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].Duration = e.target.value;
+                            copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, e.target.value);
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        />
+                      </div>
+
+                      <div className="col-md-3">
+                        <label className="form-label fw-semibold">Remarks</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="Doctor's remarks"
+                          value={med.Remarks}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].Remarks = e.target.value;
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        />
+                      </div>
+
+                      <div className="col-md-1">
+                        <label className="form-label fw-semibold">Quantity</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          min="0"
+                          value={med.Quantity}
+                          onChange={(e) => {
+                            const copy = [...formData.Medicines];
+                            copy[i].Quantity = Number(e.target.value) || 0;
+                            setFormData(prev => ({ ...prev, Medicines: copy }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 ))}
-              </select>
-            )}
-          </div>
-
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Food Timing</label>
-            <select
-              className="form-select"
-              value={med.FoodTiming}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].FoodTiming = e.target.value;
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            >
-              <option value="">Select Timing</option>
-              {foodTimingOptions.map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Strength</label>
-            {med.ToBePrescribed ? (
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g., 500mg, 5ml"
-                value={med.Strength || ""}
-                onChange={(e) => {
-                  const copy = [...formData.Medicines];
-                  copy[i].Strength = e.target.value;
-                  setFormData(prev => ({ ...prev, Medicines: copy }));
-                }}
-              />
-            ) : (
-              <select
-                className="form-select"
-                value={med.Strength || ""}
-                disabled={!med.Medicine_Name}
-                onChange={(e) => {
-                  const copy = [...formData.Medicines];
-                  copy[i].Strength = e.target.value;
-                  setFormData(prev => ({ ...prev, Medicines: copy }));
-                }}
-              >
-                <option value="">
-                  {getStrengthOptions(med.Medicine_Name, med.Medicine_Type, med.Dosage_Form).length > 0
-                    ? "Select Strength"
-                    : "Not specified"}
-                </option>
-                {getStrengthOptions(med.Medicine_Name, med.Medicine_Type, med.Dosage_Form).map((strength, idx) => (
-                  <option key={`${med._uid || i}-str-${idx}`} value={strength}>
-                    {strength}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
-
-        {/* Second Row: Dosage Details */}
-        <div className="row g-2 align-items-end">
-          <div className="col-md-4">
-            <label className="form-label fw-semibold">Dosage Times</label>
-            <div className="d-flex gap-3 mt-2">
-              <div className="form-check">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id={`morning-${i}`}
-                  checked={med.Morning}
-                  onChange={(e) => {
-                    const copy = [...formData.Medicines];
-                    copy[i].Morning = e.target.checked;
-                    copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
-                    setFormData(prev => ({ ...prev, Medicines: copy }));
-                  }}
-                />
-                <label className="form-check-label" htmlFor={`morning-${i}`}>
-                  Morning
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id={`afternoon-${i}`}
-                  checked={med.Afternoon}
-                  onChange={(e) => {
-                    const copy = [...formData.Medicines];
-                    copy[i].Afternoon = e.target.checked;
-                    copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
-                    setFormData(prev => ({ ...prev, Medicines: copy }));
-                  }}
-                />
-                <label className="form-check-label" htmlFor={`afternoon-${i}`}>
-                  Afternoon
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id={`night-${i}`}
-                  checked={med.Night}
-                  onChange={(e) => {
-                    const copy = [...formData.Medicines];
-                    copy[i].Night = e.target.checked;
-                    copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, copy[i].Duration);
-                    setFormData(prev => ({ ...prev, Medicines: copy }));
-                  }}
-                />
-                <label className="form-check-label" htmlFor={`night-${i}`}>
-                  Night
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="col-md-2">
-            <label className="form-label fw-semibold">Duration</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="5 days"
-              value={med.Duration}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].Duration = e.target.value;
-                copy[i].Quantity = calculateQuantity(copy[i].Morning, copy[i].Afternoon, copy[i].Night, e.target.value);
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            />
-          </div>
-
-          <div className="col-md-3">
-            <label className="form-label fw-semibold">Remarks</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Doctor's remarks"
-              value={med.Remarks}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].Remarks = e.target.value;
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            />
-          </div>
-
-          <div className="col-md-1">
-            <label className="form-label fw-semibold">Quantity</label>
-            <input
-              type="number"
-              className="form-control"
-              min="0"
-              value={med.Quantity}
-              onChange={(e) => {
-                const copy = [...formData.Medicines];
-                copy[i].Quantity = Number(e.target.value) || 0;
-                setFormData(prev => ({ ...prev, Medicines: copy }));
-              }}
-            />
-          </div>
-        </div>
-      </div>
-))}
 
                 <button
                   type="button"
@@ -2836,366 +3022,366 @@ const relevantDiseases = diseases.filter((d) => {
           </div>
         </div>
         <div className="col-lg-3">
-  {(selectedEmployee || selectedVisit) && (
-    <div className="card shadow border-0 mb-3">
-      <div className="card-header bg-secondary text-white">
-        <strong>Patient Profile</strong>
-      </div>
-      <div className="card-body py-3 px-3">
-        <div className="d-flex gap-3 align-items-start">
-          <img
-            src={resolveProfileImageUrl(
-              selectedVisit?.IsFamilyMember
-                ? selectedVisit?.FamilyMember?.Photo
-                : selectedEmployee?.Photo || selectedVisit?.employee_id?.Photo
-            )}
-            alt="Patient"
-            onError={(e) => {
-              e.currentTarget.onerror = null;
-              e.currentTarget.src = FALLBACK_PROFILE_IMAGE;
-            }}
-            style={{
-              width: "140px",
-              height: "140px",
-              borderRadius: "14px",
-              objectFit: "cover",
-              objectPosition: "center",
-              border: "1px solid rgba(191,219,254,0.9)",
-              boxShadow: "0 10px 24px rgba(15,23,42,0.12)",
-              background: "rgba(255,255,255,0.92)",
-              flexShrink: 0,
-              marginRight: "14px"
-            }}
-          />
-          <div className="small" style={{ color: "#1F2933", minWidth: 0 }}>
-            <div className="fw-semibold mb-2" style={{ fontSize: "14px", wordBreak: "break-word" }}>
-              {selectedPatientName}
+          {(selectedEmployee || selectedVisit) && (
+            <div className="card shadow border-0 mb-3">
+              <div className="card-header bg-secondary text-white">
+                <strong>Patient Profile</strong>
+              </div>
+              <div className="card-body py-3 px-3">
+                <div className="d-flex gap-3 align-items-start">
+                  <img
+                    src={resolveProfileImageUrl(
+                      selectedVisit?.IsFamilyMember
+                        ? selectedVisit?.FamilyMember?.Photo
+                        : selectedEmployee?.Photo || selectedVisit?.employee_id?.Photo
+                    )}
+                    alt="Patient"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = FALLBACK_PROFILE_IMAGE;
+                    }}
+                    style={{
+                      width: "140px",
+                      height: "140px",
+                      borderRadius: "14px",
+                      objectFit: "cover",
+                      objectPosition: "center",
+                      border: "1px solid rgba(191,219,254,0.9)",
+                      boxShadow: "0 10px 24px rgba(15,23,42,0.12)",
+                      background: "rgba(255,255,255,0.92)",
+                      flexShrink: 0,
+                      marginRight: "14px"
+                    }}
+                  />
+                  <div className="small" style={{ color: "#1F2933", minWidth: 0 }}>
+                    <div className="fw-semibold mb-2" style={{ fontSize: "14px", wordBreak: "break-word" }}>
+                      {selectedPatientName}
+                    </div>
+                    <div className="mb-1"><strong>ABS No:</strong> {selectedPatientAbsNo}</div>
+                    <div className="mb-1"><strong>Blood Group:</strong> {selectedPatientBloodGroup}</div>
+                    <div className="mb-1"><strong>Gender:</strong> {selectedPatientGender}</div>
+                    <div className="mb-1"><strong>Age:</strong> {selectedPatientAge}</div>
+                    <div><strong>Last Visit:</strong> {selectedPatientLastVisit}</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="mb-1"><strong>ABS No:</strong> {selectedPatientAbsNo}</div>
-            <div className="mb-1"><strong>Blood Group:</strong> {selectedPatientBloodGroup}</div>
-            <div className="mb-1"><strong>Gender:</strong> {selectedPatientGender}</div>
-            <div className="mb-1"><strong>Age:</strong> {selectedPatientAge}</div>
-            <div><strong>Last Visit:</strong> {selectedPatientLastVisit}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )}
+          )}
 
-  {/* Previous 2 Prescriptions */}
-  {lastTwoVisits.length > 0 && (
-    <div className="card shadow border-0 mb-3">
-      <div className="card-header bg-secondary text-white">
-        <strong>Previous 2 Prescriptions</strong>
-      </div>
-
-      <div className="card-body">
-        {lastTwoVisits.map((prescription, index) =>
-          renderPrescriptionHistoryCard(prescription, `sidebar-${index}`)
-        )}
-      </div>
-    </div>
-  )}
-
-  {/* 🔥 ADD A TEST CARD */}
-  <div className="card shadow border-0">
-    <div className="card-header bg-dark text-white">
-      <strong>Add a Test</strong>
-    </div>
-
-
-    <div className="card-body">
-      {diagnosisData.Tests.map((t, i) => {
-        const panel = t.Panel_ID ? getDiagnosticPanelById(t.Panel_ID) : null;
-        const panelSummary = panel
-          ? (panel.tests || [])
-              .map((panelTest, index) => `${index + 1}. ${String(panelTest?.test_name || panelTest?.name || "").trim()}`)
-              .filter((line) => !line.endsWith(". "))
-          : [];
-
-        return (
-          <div key={i} className="border rounded p-3 mb-3 bg-light">
-            <div className="d-flex justify-content-between align-items-center mb-3">
-              <h6 className="mb-0">Test #{i + 1}</h6>
-              {diagnosisData.Tests.length > 1 && (
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm"
-                  onClick={() => {
-                    const copy = diagnosisData.Tests.filter((_, idx) => idx !== i);
-                    setDiagnosisData((prev) => ({
-                      ...prev,
-                      Tests: copy
-                    }));
-                  }}
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-
-            <div className="row g-3">
-              <div className="col-md-12">
-                <label className="form-label fw-semibold">Select Panel</label>
-                <select
-                  className="form-select"
-                  value={t.Panel_ID || ""}
-                  onChange={(e) => {
-                    const panelId = e.target.value;
-                    if (!panelId) {
-                      clearDiagnosisRowPanel(i);
-                      return;
-                    }
-                    applyPanelToDiagnosisRow(i, panelId);
-                  }}
-                >
-                  <option value="">No panel selected</option>
-                  {(diagnosticPanels || []).map((panelItem) => (
-                    <option key={panelItem._id || panelItem.id} value={panelItem._id || panelItem.id}>
-                      {panelItem.name}
-                    </option>
-                  ))}
-                </select>
+          {/* Previous 2 Prescriptions */}
+          {lastTwoVisits.length > 0 && (
+            <div className="card shadow border-0 mb-3">
+              <div className="card-header bg-secondary text-white">
+                <strong>Previous 2 Prescriptions</strong>
               </div>
 
-              {panel ? (
-                <div className="col-md-12">
-                  <label className="form-label fw-semibold mb-2">Panel tests</label>
-                  <textarea
-                    className="form-control"
-                    rows={Math.min(8, Math.max(3, panelSummary.length || 3))}
-                    value={panelSummary.join("\n")}
-                    readOnly
-                  />
-                </div>
-              ) : (
-                <>
-                  <div className="col-md-6">
-                    <label className="form-label fw-semibold">Category</label>
-                    <select
-                      className="form-select"
-                      value={t.Category || ""}
-                      onChange={(e) => {
-                        const copy = [...diagnosisData.Tests];
-                        copy[i] = {
-                          ...(copy[i] || createEmptyDiagnosisTest()),
-                          Category: e.target.value,
-                          Test_ID: "",
-                          Test_Name: "",
-                          test_id: "",
-                          test_name: ""
-                        };
+              <div className="card-body">
+                {lastTwoVisits.map((prescription, index) =>
+                  renderPrescriptionHistoryCard(prescription, `sidebar-${index}`)
+                )}
+              </div>
+            </div>
+          )}
 
-                        setDiagnosisData((prev) => ({
+          {/* 🔥 ADD A TEST CARD */}
+          <div className="card shadow border-0">
+            <div className="card-header bg-dark text-white">
+              <strong>Add a Test</strong>
+            </div>
+
+
+            <div className="card-body">
+              {diagnosisData.Tests.map((t, i) => {
+                const panel = t.Panel_ID ? getDiagnosticPanelById(t.Panel_ID) : null;
+                const panelSummary = panel
+                  ? (panel.tests || [])
+                    .map((panelTest, index) => `${index + 1}. ${String(panelTest?.test_name || panelTest?.name || "").trim()}`)
+                    .filter((line) => !line.endsWith(". "))
+                  : [];
+
+                return (
+                  <div key={i} className="border rounded p-3 mb-3 bg-light">
+                    <div className="d-flex justify-content-between align-items-center mb-3">
+                      <h6 className="mb-0">Test #{i + 1}</h6>
+                      {diagnosisData.Tests.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => {
+                            const copy = diagnosisData.Tests.filter((_, idx) => idx !== i);
+                            setDiagnosisData((prev) => ({
+                              ...prev,
+                              Tests: copy
+                            }));
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="row g-3">
+                      <div className="col-md-12">
+                        <label className="form-label fw-semibold">Select Panel</label>
+                        <select
+                          className="form-select"
+                          value={t.Panel_ID || ""}
+                          onChange={(e) => {
+                            const panelId = e.target.value;
+                            if (!panelId) {
+                              clearDiagnosisRowPanel(i);
+                              return;
+                            }
+                            applyPanelToDiagnosisRow(i, panelId);
+                          }}
+                        >
+                          <option value="">No panel selected</option>
+                          {(diagnosticPanels || []).map((panelItem) => (
+                            <option key={panelItem._id || panelItem.id} value={panelItem._id || panelItem.id}>
+                              {panelItem.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {panel ? (
+                        <div className="col-md-12">
+                          <label className="form-label fw-semibold mb-2">Panel tests</label>
+                          <textarea
+                            className="form-control"
+                            rows={Math.min(8, Math.max(3, panelSummary.length || 3))}
+                            value={panelSummary.join("\n")}
+                            readOnly
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="col-md-6">
+                            <label className="form-label fw-semibold">Category</label>
+                            <select
+                              className="form-select"
+                              value={t.Category || ""}
+                              onChange={(e) => {
+                                const copy = [...diagnosisData.Tests];
+                                copy[i] = {
+                                  ...(copy[i] || createEmptyDiagnosisTest()),
+                                  Category: e.target.value,
+                                  Test_ID: "",
+                                  Test_Name: "",
+                                  test_id: "",
+                                  test_name: ""
+                                };
+
+                                setDiagnosisData((prev) => ({
+                                  ...prev,
+                                  Tests: copy
+                                }));
+                              }}
+                            >
+                              <option value="">Select Category</option>
+                              {testCategoryOptions.map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="col-md-6">
+                            <label className="form-label fw-semibold">Test Name</label>
+                            <select
+                              className="form-select"
+                              value={t.Test_ID || t.Test_Name || ""}
+                              disabled={!t.Category || testsLoading}
+                              onChange={(e) => {
+                                const list = t.Category && testsByCategory[t.Category] ? testsByCategory[t.Category] : [];
+                                const found = list.find((x) => String(x._id || "") === String(e.target.value));
+
+                                const copy = [...diagnosisData.Tests];
+                                if (found) {
+                                  copy[i] = {
+                                    ...(copy[i] || createEmptyDiagnosisTest()),
+                                    Test_ID: found._id || "",
+                                    Test_Name: found.name || "",
+                                    test_id: found._id || "",
+                                    test_name: found.name || ""
+                                  };
+                                } else {
+                                  copy[i] = {
+                                    ...(copy[i] || createEmptyDiagnosisTest()),
+                                    Test_ID: "",
+                                    Test_Name: e.target.value || "",
+                                    test_id: "",
+                                    test_name: e.target.value || ""
+                                  };
+                                }
+
+                                setDiagnosisData((prev) => ({ ...prev, Tests: copy }));
+                              }}
+                            >
+                              <option value="">{testsLoading ? "Loading tests..." : "Select Test"}</option>
+                              {(testsByCategory[t.Category] || []).map((test) => (
+                                <option key={`${t.Category}-${test._id || test.name}`} value={test._id || test.name}>
+                                  {test.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                className="btn btn-outline-primary w-100 mt-2"
+                onClick={() =>
+                  setDiagnosisData((prev) => ({
+                    ...prev,
+                    Tests: [...prev.Tests, createEmptyDiagnosisTest()]
+                  }))
+                }
+              >
+                + Add Test
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-success w-100 mt-3"
+                onClick={handleDiagnosisSubmit}
+              >
+                Submit Test
+              </button>
+
+            </div>
+          </div>
+          {/* ADD AN XRAY CARD */}
+          <div className="card shadow border-0 mt-3">
+            <div className="card-header bg-dark text-white">
+              <strong>Add an X-ray</strong>
+            </div>
+
+            <div className="card-body">
+
+              {xrayData.Xrays.map((x, i) => (
+                <div key={i} className="mb-2">
+                  <div className="row g-2 align-items-end">
+                    <div className="col-md-4">
+                      <label className="form-label fw-semibold">Body Part</label>
+                      <select
+                        className="form-select"
+                        value={x.Body_Part || ""}
+                        onChange={(e) => {
+                          const selectedBodyPart = e.target.value;
+                          const copy = [...xrayData.Xrays];
+                          copy[i] = {
+                            ...copy[i],
+                            Body_Part: selectedBodyPart,
+                            Xray_ID: "",
+                            Xray_Type: ""
+                          };
+                          setXrayData(prev => ({
+                            ...prev,
+                            Xrays: copy
+                          }));
+                        }}
+                      >
+                        <option value="">Select body part</option>
+                        {xrayBodyPartOptions.map((part) => (
+                          <option key={part} value={part}>
+                            {part}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="col-md-8">
+                      <label className="form-label fw-semibold">X-ray Selection</label>
+                      <select
+                        className="form-select"
+                        value={x.Xray_ID || getXrayOptionValue(x)}
+                        onChange={(e) => {
+                          const selected = getXrayOptionsByBodyPart(x.Body_Part).find(
+                            (xr) => getXrayOptionValue(xr) === e.target.value
+                          ) || xrayMaster.find(
+                            (xr) => getXrayOptionValue(xr) === e.target.value
+                          );
+
+                          const copy = [...xrayData.Xrays];
+                          copy[i] = {
+                            ...copy[i],
+                            Body_Part: selected?.Body_Part || copy[i].Body_Part || "",
+                            Xray_ID: selected?._id || "",
+                            Xray_Type: selected?.Xray_Type || ""
+                          };
+
+                          setXrayData(prev => ({
+                            ...prev,
+                            Xrays: copy
+                          }));
+                        }}
+                        disabled={!x.Body_Part}
+                      >
+                        <option value="">{x.Body_Part ? "Select X-ray test" : "Select body part first"}</option>
+                        {getXrayOptionsByBodyPart(x.Body_Part).map(xr => (
+                          <option key={getXrayOptionValue(xr)} value={getXrayOptionValue(xr)}>
+                            {xr.Xray_Type}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {xrayData.Xrays.length > 1 && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger w-100"
+                      onClick={() => {
+                        const copy = xrayData.Xrays.filter(
+                          (_, idx) => idx !== i
+                        );
+                        setXrayData(prev => ({
                           ...prev,
-                          Tests: copy
+                          Xrays: copy
                         }));
                       }}
                     >
-                      <option value="">Select Category</option>
-                      {testCategoryOptions.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
 
-                  <div className="col-md-6">
-                    <label className="form-label fw-semibold">Test Name</label>
-                    <select
-                      className="form-select"
-                      value={t.Test_ID || t.Test_Name || ""}
-                      disabled={!t.Category || testsLoading}
-                      onChange={(e) => {
-                        const list = t.Category && testsByCategory[t.Category] ? testsByCategory[t.Category] : [];
-                        const found = list.find((x) => String(x._id || "") === String(e.target.value));
+              <button
+                type="button"
+                className="btn btn-outline-primary w-100 mt-2"
+                onClick={() =>
+                  setXrayData(prev => ({
+                    ...prev,
+                    Xrays: [
+                      ...prev.Xrays,
+                      { Body_Part: "", Xray_ID: "", Xray_Type: "" }
+                    ]
+                  }))
+                }
+              >
+                + Add X-ray
+              </button>
 
-                        const copy = [...diagnosisData.Tests];
-                        if (found) {
-                          copy[i] = {
-                            ...(copy[i] || createEmptyDiagnosisTest()),
-                            Test_ID: found._id || "",
-                            Test_Name: found.name || "",
-                            test_id: found._id || "",
-                            test_name: found.name || ""
-                          };
-                        } else {
-                          copy[i] = {
-                            ...(copy[i] || createEmptyDiagnosisTest()),
-                            Test_ID: "",
-                            Test_Name: e.target.value || "",
-                            test_id: "",
-                            test_name: e.target.value || ""
-                          };
-                        }
+              <button
+                type="button"
+                className="btn btn-success w-100 mt-3"
+                onClick={handleXraySubmit}
+              >
+                Submit X-ray
+              </button>
 
-                        setDiagnosisData((prev) => ({ ...prev, Tests: copy }));
-                      }}
-                    >
-                      <option value="">{testsLoading ? "Loading tests..." : "Select Test"}</option>
-                      {(testsByCategory[t.Category] || []).map((test) => (
-                        <option key={`${t.Category}-${test._id || test.name}`} value={test._id || test.name}>
-                          {test.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
             </div>
           </div>
-        );
-      })}
 
-      <button
-        type="button"
-        className="btn btn-outline-primary w-100 mt-2"
-        onClick={() =>
-          setDiagnosisData((prev) => ({
-            ...prev,
-            Tests: [...prev.Tests, createEmptyDiagnosisTest()]
-          }))
-        }
-      >
-        + Add Test
-      </button>
-
-      <button
-        type="button"
-        className="btn btn-success w-100 mt-3"
-        onClick={handleDiagnosisSubmit}
-      >
-        Submit Test
-      </button>
-
-    </div>
-  </div>
-  {/* ADD AN XRAY CARD */}
-<div className="card shadow border-0 mt-3">
-  <div className="card-header bg-dark text-white">
-    <strong>Add an X-ray</strong>
-  </div>
-
-  <div className="card-body">
-
-    {xrayData.Xrays.map((x, i) => (
-      <div key={i} className="mb-2">
-        <div className="row g-2 align-items-end">
-          <div className="col-md-4">
-            <label className="form-label fw-semibold">Body Part</label>
-            <select
-              className="form-select"
-              value={x.Body_Part || ""}
-              onChange={(e) => {
-                const selectedBodyPart = e.target.value;
-                const copy = [...xrayData.Xrays];
-                copy[i] = {
-                  ...copy[i],
-                  Body_Part: selectedBodyPart,
-                  Xray_ID: "",
-                  Xray_Type: ""
-                };
-                setXrayData(prev => ({
-                  ...prev,
-                  Xrays: copy
-                }));
-              }}
-            >
-              <option value="">Select body part</option>
-              {xrayBodyPartOptions.map((part) => (
-                <option key={part} value={part}>
-                  {part}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="col-md-8">
-            <label className="form-label fw-semibold">X-ray Selection</label>
-            <select
-              className="form-select"
-              value={x.Xray_ID || getXrayOptionValue(x)}
-              onChange={(e) => {
-                const selected = getXrayOptionsByBodyPart(x.Body_Part).find(
-                  (xr) => getXrayOptionValue(xr) === e.target.value
-                ) || xrayMaster.find(
-                  (xr) => getXrayOptionValue(xr) === e.target.value
-                );
-
-                const copy = [...xrayData.Xrays];
-                copy[i] = {
-                  ...copy[i],
-                  Body_Part: selected?.Body_Part || copy[i].Body_Part || "",
-                  Xray_ID: selected?._id || "",
-                  Xray_Type: selected?.Xray_Type || ""
-                };
-
-                setXrayData(prev => ({
-                  ...prev,
-                  Xrays: copy
-                }));
-              }}
-              disabled={!x.Body_Part}
-            >
-              <option value="">{x.Body_Part ? "Select X-ray test" : "Select body part first"}</option>
-              {getXrayOptionsByBodyPart(x.Body_Part).map(xr => (
-                <option key={getXrayOptionValue(xr)} value={getXrayOptionValue(xr)}>
-                  {xr.Xray_Type}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
-
-        {xrayData.Xrays.length > 1 && (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-danger w-100"
-            onClick={() => {
-              const copy = xrayData.Xrays.filter(
-                (_, idx) => idx !== i
-              );
-              setXrayData(prev => ({
-                ...prev,
-                Xrays: copy
-              }));
-            }}
-          >
-            Remove
-          </button>
-        )}
-      </div>
-    ))}
-
-    <button
-      type="button"
-      className="btn btn-outline-primary w-100 mt-2"
-      onClick={() =>
-        setXrayData(prev => ({
-          ...prev,
-          Xrays: [
-            ...prev.Xrays,
-            { Body_Part: "", Xray_ID: "", Xray_Type: "" }
-          ]
-        }))
-      }
-    >
-      + Add X-ray
-    </button>
-
-    <button
-      type="button"
-      className="btn btn-success w-100 mt-3"
-      onClick={handleXraySubmit}
-    >
-      Submit X-ray
-    </button>
-
-  </div>
-</div>
-
-</div>
 
       </div>
       {selectedDiagnosisReport && (
@@ -3268,7 +3454,7 @@ const relevantDiseases = diseases.filter((d) => {
 
               <div className="modal-body p-0">
                 <div className="d-flex justify-content-center p-3 overflow-auto">
-                      <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
+                  <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
                 </div>
               </div>
 
