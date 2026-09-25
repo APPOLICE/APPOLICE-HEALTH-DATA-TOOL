@@ -11,22 +11,14 @@ const PDFDownloadButton = ({ modulePath, params = {}, filenamePrefix = 'report',
       Object.keys(params || {}).forEach(k => {
         if (params[k] !== undefined && params[k] !== null && params[k] !== '') url.searchParams.append(k, params[k]);
       });
-
-      const res = await fetch(url.toString(), { method: 'GET' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || 'Download failed');
-      }
-
-      const blob = await res.blob();
-      const dlUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = dlUrl;
+      a.href = url.toString();
       a.download = `${filenamePrefix}.pdf`;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(dlUrl);
     } catch (err) {
       console.error('PDF download error:', err);
       alert('Failed to download PDF');

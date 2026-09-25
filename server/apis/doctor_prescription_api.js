@@ -7,7 +7,10 @@ const MedicalAction = require("../models/medical_action");
 const ToBePrescribedMedicine = require("../models/to_be_prescribed_medicine");
 const Employee = require("../models/employee");
 const FamilyMember = require("../models/family_member");
+const DailyVisit = require("../models/daily_visit");
 const { normalizePatientMetrics } = require("../utils/healthMetrics");
+const { storeReportPdf } = require("../utils/storedReportPdf");
+const { hydratePrescriptionInvestigations } = require("../utils/prescriptionInvestigations");
 
 const getPatientMetrics = async ({ employeeId, isFamilyMember, familyMemberId }) => {
   const patient = isFamilyMember && familyMemberId
@@ -66,7 +69,7 @@ router.post("/add", async (req, res) => {
 
     // Store regular medicines in MedicalAction
     if (regularMedicines.length > 0) {
-      await MedicalAction.create({
+      const action = await MedicalAction.create({
         employee_id: Employee_ID,
         visit_id: visit_id || null,
         action_type: "DOCTOR_PRESCRIPTION",
@@ -80,6 +83,42 @@ router.post("/add", async (req, res) => {
         },
         remarks: Notes || ""
       });
+
+      try {
+        const [employee, familyMember, visit] = await Promise.all([
+          Employee.findById(Employee_ID).select("_id Name ABS_NO DOB Gender Blood_Group Height Weight BMI").lean(),
+          IsFamilyMember && FamilyMember_ID
+            ? FamilyMember.findById(FamilyMember_ID).select("_id Name Relationship DOB Gender Blood_Group Height Weight BMI").lean()
+            : Promise.resolve(null),
+          visit_id
+            ? DailyVisit.findById(visit_id).populate("Institute_ID", "Institute_Name").lean()
+            : Promise.resolve(null)
+        ]);
+
+        const reportRecord = await hydratePrescriptionInvestigations({
+          _id: action._id,
+          Timestamp: action.created_at || action.createdAt || new Date(),
+          IsFamilyMember: Boolean(IsFamilyMember),
+          FamilyMember: familyMember,
+          Employee: employee,
+          Institute: visit?.Institute_ID || Institute_ID,
+          VisitSummary: visit
+            ? {
+                _id: visit._id,
+                symptoms: visit.symptoms || "",
+                Vitals: visit.Vitals || {}
+              }
+            : null,
+          PatientMetrics: patientMetrics,
+          Medicines: regularMedicines,
+          Notes: Notes || "",
+          Source: "DOCTOR_PRESCRIPTION",
+          visit_id: visit_id || null
+        });
+        await storeReportPdf("prescription", action._id, reportRecord);
+      } catch (pdfErr) {
+        console.error("Doctor prescription PDF generation failed:", pdfErr.message);
+      }
     }
 
     // Store to-be-prescribed medicines in separate collection

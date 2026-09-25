@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./InstitutesTheme.css";
 import { fetchDiagnosticPanels } from "../../utils/masterData_clean";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 
 const DiagnosisEntryForm = () => {
   const FALLBACK_PROFILE_IMAGE = "/profile-fallback.png";
@@ -23,8 +24,11 @@ const DiagnosisEntryForm = () => {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [pastRecords, setPastRecords] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedHistoryRecord, setSelectedHistoryRecord] = useState(null);
   const [tokenNumber, setTokenNumber] = useState(null);
   const [showDoctorNotes, setShowDoctorNotes] = useState({});
+  const [submitError, setSubmitError] = useState("");
+  const [invalidTestIndexes, setInvalidTestIndexes] = useState([]);
 
 
   const [formData, setFormData] = useState({
@@ -37,12 +41,6 @@ const DiagnosisEntryForm = () => {
   });
 
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-  const resolveReportUrl = (url) => {
-    if (!url) return "";
-    if (/^https?:\/\//i.test(url)) return url;
-    const base = String(BACKEND_URL || "").replace(/\/$/, "");
-    return `${base}/${String(url).replace(/^\/+/, "")}`;
-  };
   const resolveProfileImageUrl = (photoPath) => {
     if (!photoPath) return FALLBACK_PROFILE_IMAGE;
     if (/^https?:\/\//i.test(photoPath)) return photoPath;
@@ -565,7 +563,9 @@ const expandSelectedPanel = (panelId) => {
   }));
 };
 
-const handleTestChange = (index, field, value) => {
+  const handleTestChange = (index, field, value) => {
+  setSubmitError("");
+  setInvalidTestIndexes((previous) => previous.filter((item) => item !== index));
   setFormData(prev => {
 
     const updated = [...prev.Tests];
@@ -649,6 +649,8 @@ const addTest = () =>
   const handleSubmit = async (e) => {
 
   e.preventDefault();
+  setSubmitError("");
+  setInvalidTestIndexes([]);
 
   if (!formData.Employee_ID) {
     alert("Please select a patient first");
@@ -657,6 +659,36 @@ const addTest = () =>
 
   if (formData.IsFamilyMember && !formData.FamilyMember_ID) {
     alert("Please select a family member");
+    return;
+  }
+
+  if (!formData.Tests.length) {
+    setSubmitError("Add at least one diagnostic test before saving.");
+    return;
+  }
+
+  const incompleteTests = formData.Tests
+    .map((test, index) => ({ test, index }))
+    .filter(({ test }) =>
+      !String(test?.Test_Name || "").trim() ||
+      !String(test?.Result_Value || "").trim()
+    );
+  const missingResults = incompleteTests.filter(({ test }) =>
+    String(test?.Test_Name || "").trim() && !String(test?.Result_Value || "").trim()
+  );
+  const missingTestNames = missingResults.map(({ test }) => String(test.Test_Name).trim());
+  const missingSelections = incompleteTests.filter(({ test }) => !String(test?.Test_Name || "").trim());
+
+  if (incompleteTests.length) {
+    setInvalidTestIndexes(incompleteTests.map(({ index }) => index));
+    const messages = [];
+    if (missingResults.length) {
+      messages.push(`${missingResults.length} test${missingResults.length === 1 ? " is" : "s are"} missing results: ${missingTestNames.join(", ")}.`);
+    }
+    if (missingSelections.length) {
+      messages.push(`Select a test for row${missingSelections.length === 1 ? "" : "s"} ${missingSelections.map(({ index }) => index + 1).join(", ")}.`);
+    }
+    setSubmitError(messages.join(" "));
     return;
   }
 
@@ -697,12 +729,14 @@ const addTest = () =>
       }
     );
 
+    await fetchPastRecords();
     alert("✅ Diagnosis record saved successfully");
 
   } catch (err) {
 
     console.error(err);
-    alert("❌ Failed to save diagnosis");
+    const message = err?.response?.data?.error || err?.response?.data?.message || "Failed to save diagnosis.";
+    setSubmitError(message);
 
   }
 
@@ -763,6 +797,7 @@ const fetchPastRecords = async () => {
     console.log("Diagnosis Records:", res.data); 
 
     setPastRecords(res.data || []);
+    setSelectedHistoryRecord(res.data?.[0] || null);
     setShowHistory(true);   // 👈 open modal
   } catch (err) {
     console.error("Error fetching past records:", err);
@@ -811,65 +846,25 @@ const fetchPastRecords = async () => {
                     📭 No previous records found.
                   </div>
                 ) : (
-                  pastRecords.map((record, index) => (
-                    <div
-                      key={record._id || index}
-                      className="border-bottom pb-3 mb-3"
-                    >
-                      <div className="text-muted small mb-2">
-                        📅 Date: {record?.createdAt ? formatDateDMY(record.createdAt) : "—"}
-                      </div>
-                      {record?.Tests?.length > 0 ? (
-                        record.Tests.map((t, i) => {
-
-                          const reports = t.Reports || [];
-
-                          return (
-                            <div key={i} className="mb-2 p-2 bg-light rounded">
-
-                              <div className="fw-semibold text-dark">
-                                {t?.Test_Name || "Test"}
-                              </div>
-
-                              <small className="text-muted">
-                                Result: {t?.Result_Value || "N/A"}
-                                {t?.Units && ` ${t.Units}`}
-                              </small>
-
-                              {t?.Reference_Range && (
-                                <div className="small text-secondary mt-1">
-                                  Ref Range: {t.Reference_Range}
-                                </div>
-                              )}
-
-                              {/* ✅ REPORT BUTTON IN SAME BLOCK */}
-                              {reports.length > 0 && (
-                                <div className="mt-2">
-                                  {reports.map((r, ri) => (
-                                    <a
-                                      key={ri}
-                                      href={resolveReportUrl(r?.url)}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="btn btn-sm btn-outline-primary me-2"
-                                    >
-                                      📄 View Report
-                                    </a>
-                                  ))}
-                                </div>
-                              )}
-
-                            </div>
-                          );
-
-                        })
-                      ) : (
-                        <div className="text-muted small">
-                          No test details available
-                        </div>
-                      )}
+                  <>
+                    <div className="d-flex flex-wrap gap-2 mb-3">
+                      {pastRecords.map((record, index) => (
+                        <button
+                          key={record._id || index}
+                          type="button"
+                          className={`btn btn-sm ${selectedHistoryRecord?._id === record?._id ? "btn-primary" : "btn-outline-primary"}`}
+                          onClick={() => setSelectedHistoryRecord(record)}
+                        >
+                          {record?.createdAt ? formatDateDMY(record.createdAt) : `Report ${index + 1}`}
+                        </button>
+                      ))}
                     </div>
-                  ))
+                    <ReportHtmlPreview
+                      modulePath="diagnosis-api"
+                      report={selectedHistoryRecord}
+                      title="Diagnosis test history report"
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -895,6 +890,11 @@ const fetchPastRecords = async () => {
 
             <div className="card-body">
               <form onSubmit={handleSubmit}>
+                {submitError && (
+                  <div className="alert alert-danger" role="alert">
+                    <strong>Cannot save diagnosis.</strong> {submitError}
+                  </div>
+                )}
                 {/* Institute */}
                 <div className="mb-4">
                   <label className="form-label fw-semibold">🏥 Institute</label>
@@ -1317,7 +1317,8 @@ const fetchPastRecords = async () => {
                               <label className="form-label fw-semibold">Result</label>
                               <input
                                 type="text"
-                                className="form-control"
+                                className={`form-control${invalidTestIndexes.includes(i) && !String(t.Result_Value || "").trim() ? " is-invalid" : ""}`}
+                                aria-invalid={invalidTestIndexes.includes(i) && !String(t.Result_Value || "").trim()}
                                 placeholder="Result (e.g., 14.2)"
                                 value={t.Result_Value}
                                 onChange={e => handleTestChange(i, "Result_Value", e.target.value)}

@@ -20,6 +20,17 @@ const {
   findMasterTestByLooseName
 } = require("../utils/instituteMasterData");
 const { uploadBufferToCloudinary } = require("../utils/cloudinary");
+const {
+  generateSingleReportPdf,
+  generateCombinedReportPdf,
+  buildReportHtml,
+} = require("../utils/reportLayout");
+const {
+  ensureStoredReportPdf,
+  sendStoredReportPdf,
+  storeReportPdf,
+} = require("../utils/storedReportPdf");
+const { invalidatePrescriptionPdfsForEncounter } = require("../utils/prescriptionInvestigations");
 
 const parseDateInput = (value, endOfDay = false) => {
   if (!value) return null;
@@ -455,6 +466,10 @@ diagnosisApp.post(
         Employee: Employee_ID
       };
 
+      if (mongoose.Types.ObjectId.isValid(visit_id)) {
+        recordQuery.Visit = visit_id;
+      }
+
       if (IsFamilyMember === "true" || IsFamilyMember === true) {
         recordQuery.IsFamilyMember = true;
         recordQuery.FamilyMember = FamilyMember_ID;
@@ -557,6 +572,20 @@ diagnosisApp.post(
       }
 
       await record.save();
+
+      await invalidatePrescriptionPdfsForEncounter({
+        employeeId: Employee_ID,
+        visitId: visit_id || null,
+        familyMemberId: (IsFamilyMember === "true" || IsFamilyMember === true) ? FamilyMember_ID : null,
+        timestamp: new Date(),
+      });
+
+      const populatedRecord = await DiagnosisRecord.findById(record._id)
+        .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+        .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+        .populate('Institute', 'Institute_Name')
+        .lean();
+      await storeReportPdf('diagnosis', record._id, populatedRecord);
 
       /* -------------------------
          Medical Action Log
@@ -757,14 +786,28 @@ diagnosisApp.get('/records-with-reports/:employeeId', async (req, res) => {
   }
 });
 
-// Download PDF for diagnosis records within an optional date range
-const PDFDocument = require('pdfkit');
 diagnosisApp.get('/download-pdf', async (req, res) => {
   try {
-    const { employeeId, personId, fromDate, toDate } = req.query;
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required' });
+    const { employeeId, personId, fromDate, toDate, recordId } = req.query;
+    if (!employeeId && !recordId) return res.status(400).json({ message: 'employeeId is required' });
 
     console.debug('Diagnosis /download-pdf request', { query: req.query });
+
+    if (recordId) {
+      const record = await DiagnosisRecord.findById(recordId)
+        .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+        .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+        .populate('Institute', 'Institute_Name')
+        .lean();
+
+      if (!record) {
+        return res.status(404).json({ message: 'Diagnosis record not found' });
+      }
+
+      const filename = `Diagnosis_Report_${recordId}.pdf`;
+      const filePath = await ensureStoredReportPdf('diagnosis', recordId, record);
+      return sendStoredReportPdf(res, filePath, filename, "attachment");
+    }
 
     const filter = { Employee: employeeId };
     if (personId === 'self') filter.IsFamilyMember = false;
@@ -793,85 +836,68 @@ diagnosisApp.get('/download-pdf', async (req, res) => {
       count: Array.isArray(rows) ? rows.length : 0
     });
 
-    // PDF generation
-    const doc = new PDFDocument({ margin: 40 });
+    const combinedBuffer = await generateCombinedReportPdf('diagnosis', rows);
+
     const filename = `Diagnosis_Report_${employeeId}.pdf`;
     res.setHeader('Content-disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-type', 'application/pdf');
-    doc.pipe(res);
-
-    doc.fontSize(16).text('Diagnosis Reports', { align: 'center' });
-    doc.moveDown(0.2);
-    const rangeText = fromDate || toDate ? `From: ${fromDate || '-'} To: ${toDate || '-'}` : 'All dates';
-    doc.fontSize(10).text(`Patient: ${filteredRecords[0]?.Employee?.Name || 'Employee'} (${filteredRecords[0]?.Employee?.ABS_NO || '-'})`, { align: 'left' });
-    doc.text(rangeText, { align: 'left' });
-    doc.moveDown(0.5);
-
-    if (!rows || rows.length === 0) {
-      doc.text('No records found for the selected criteria.', { align: 'center' });
-      doc.end();
-      return;
-    }
-
-    let y = doc.y + 8;
-    const pageBottom = () => doc.page.height - doc.page.margins.bottom;
-    const columnX = [40, 65, 165, 290, 360, 440];
-    const columnWidths = [25, 100, 125, 70, 80, 110];
-
-    const drawHeader = () => {
-      doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('#', columnX[0], y, { width: columnWidths[0] });
-      doc.text('Patient', columnX[1], y, { width: columnWidths[1] });
-      doc.text('Report For', columnX[2], y, { width: columnWidths[2] });
-      doc.text('Institute', columnX[3], y, { width: columnWidths[3] });
-      doc.text('No. of Tests', columnX[4], y, { width: columnWidths[4] });
-      doc.text('Test Date', columnX[5], y, { width: columnWidths[5] });
-      y += 18;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#cccccc').stroke();
-      doc.font('Helvetica').fillColor('black');
-    };
-
-    drawHeader();
-
-    rows.forEach((row, index) => {
-      const patientText = `${row.Employee?.Name || '-'}${row.Employee?.ABS_NO ? ` (${row.Employee.ABS_NO})` : ''}`;
-      const reportForText = row.IsFamilyMember
-        ? `${row.FamilyMember?.Name || '-'} (${row.FamilyMember?.Relationship || '-'})`
-        : 'Self';
-      const instituteText = row.Institute?.Institute_Name || 'Medical Institute';
-      const testDateText = formatPdfDateTime(row.Tests[0]?.Timestamp || row.createdAt);
-      const lineHeight = Math.max(
-        doc.heightOfString(String(index + 1), { width: columnWidths[0] }),
-        doc.heightOfString(patientText, { width: columnWidths[1] }),
-        doc.heightOfString(reportForText, { width: columnWidths[2] }),
-        doc.heightOfString(instituteText, { width: columnWidths[3] }),
-        doc.heightOfString(String(row.Tests.length), { width: columnWidths[4] }),
-        doc.heightOfString(testDateText, { width: columnWidths[5] })
-      ) + 8;
-
-      if (y + lineHeight > pageBottom()) {
-        doc.addPage();
-        y = 40;
-        drawHeader();
-      }
-
-      doc.fontSize(10);
-      doc.text(String(index + 1), columnX[0], y, { width: columnWidths[0] });
-      doc.text(patientText, columnX[1], y, { width: columnWidths[1] });
-      doc.text(reportForText, columnX[2], y, { width: columnWidths[2] });
-      doc.text(instituteText, columnX[3], y, { width: columnWidths[3] });
-      doc.text(String(row.Tests.length), columnX[4], y, { width: columnWidths[4] });
-      doc.text(testDateText, columnX[5], y, { width: columnWidths[5] });
-
-      y += lineHeight;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#e5e7eb').stroke();
-    });
-
-    doc.end();
+    return res.send(combinedBuffer);
   } catch (err) {
     console.error('Diagnosis PDF error:', err);
     res.status(500).json({ message: 'Failed to generate PDF', error: err.message });
   }
 });
+
+const sendDiagnosisPreviewHtml = async (req, res) => {
+  try {
+    const recordId = req.params.recordId || req.query.recordId || req.query.id;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const record = await DiagnosisRecord.findById(recordId)
+      .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+      .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+      .populate('Institute', 'Institute_Name')
+      .lean();
+
+    if (!record) {
+      return res.status(404).json({ message: 'Diagnosis record not found' });
+    }
+
+    res.setHeader('Content-type', 'text/html; charset=utf-8');
+    return res.send(buildReportHtml('diagnosis', record));
+  } catch (err) {
+    console.error('Diagnosis preview HTML error:', err);
+    res.status(500).json({ message: 'Failed to generate preview HTML', error: err.message });
+  }
+};
+
+diagnosisApp.get('/preview-html', sendDiagnosisPreviewHtml);
+diagnosisApp.get('/preview-html/:recordId', sendDiagnosisPreviewHtml);
+
+const sendDiagnosisPreviewPdf = async (req, res) => {
+  try {
+    const recordId = req.params.recordId || req.query.recordId || req.query.id;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const record = await DiagnosisRecord.findById(recordId)
+      .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+      .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+      .populate('Institute', 'Institute_Name')
+      .lean();
+
+    if (!record) {
+      return res.status(404).json({ message: 'Diagnosis record not found' });
+    }
+
+    const filePath = await ensureStoredReportPdf('diagnosis', recordId, record);
+    return sendStoredReportPdf(res, filePath, `Diagnosis_Report_${recordId}.pdf`, "inline");
+  } catch (err) {
+    console.error('Diagnosis preview PDF error:', err);
+    res.status(500).json({ message: 'Failed to load preview PDF', error: err.message });
+  }
+};
+
+diagnosisApp.get('/preview-pdf', sendDiagnosisPreviewPdf);
+diagnosisApp.get('/preview-pdf/:recordId', sendDiagnosisPreviewPdf);
 
 module.exports = diagnosisApp;

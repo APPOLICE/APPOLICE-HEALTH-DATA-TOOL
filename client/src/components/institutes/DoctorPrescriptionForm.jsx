@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import "bootstrap/dist/css/bootstrap.min.css";
 import PatientSelector from "../institutes/PatientSelector";
 import { useNavigate } from "react-router-dom";
 import { fetchMasterDataMap, fetchDiagnosticPanels, getMasterMedicineEntries, getMasterOptions } from "../../utils/masterData_clean";
 import { mergeXrayTypes } from "../../data/xrayTypes";
-import XrayReportPreview from "./XrayReportPreview";
-import DiagnosisReportPreview from "./DiagnosisReportPreview";
-import SARCPLPrescriptionReport from "./SARCPLPrescriptionReport";
+import { buildReportDownloadUrl, downloadPdfBlob } from "../../utils/pdfDownload";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 import "./InstitutesTheme.css";
 
 const DoctorPrescriptionForm = () => {
@@ -49,6 +46,7 @@ const DoctorPrescriptionForm = () => {
   const [selectedXrayReport, setSelectedXrayReport] = useState(null); // { record, xray }
   const [selectedPrescriptionReport, setSelectedPrescriptionReport] = useState(null);
   const [prescriptionSuccessMessage, setPrescriptionSuccessMessage] = useState("");
+  const [prescriptionErrorMessage, setPrescriptionErrorMessage] = useState("");
   const [isSubmittingPrescription, setIsSubmittingPrescription] = useState(false);
   const [inventoryMedicines, setInventoryMedicines] = useState([]);
   const [medicineStrengths, setMedicineStrengths] = useState({});
@@ -59,14 +57,8 @@ const DoctorPrescriptionForm = () => {
     Xrays: [{ Body_Part: "", Xray_ID: "", Xray_Type: "" }]
   });
   const [downloadingXrayId, setDownloadingXrayId] = useState("");
-  const [exportXrayReport, setExportXrayReport] = useState(null);
-  const xrayExportRef = useRef(null);
   const [downloadingDiagnosisId, setDownloadingDiagnosisId] = useState("");
-  const [exportDiagnosisReport, setExportDiagnosisReport] = useState(null);
-  const diagnosisExportRef = useRef(null);
   const [downloadingPrescriptionId, setDownloadingPrescriptionId] = useState("");
-  const [exportPrescriptionReport, setExportPrescriptionReport] = useState(null);
-  const prescriptionExportRef = useRef(null);
 
   const [diseaseSearch, setDiseaseSearch] = useState("");
   const [filteredDiseases, setFilteredDiseases] = useState([]);
@@ -173,110 +165,22 @@ const DoctorPrescriptionForm = () => {
 
     try {
       setDownloadingDiagnosisId(downloadId);
-      setExportDiagnosisReport(report);
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const element = diagnosisExportRef.current;
-      if (!element) throw new Error("Unable to generate diagnosis report preview");
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
+      const downloadUrl = buildReportDownloadUrl(BACKEND_URL, "diagnosis-api", {
+        recordId: report?.record?._id || report?._id || "",
+        employeeId: selectedEmployee?._id || "",
+        personId: report?.record?.IsFamilyMember ? (report?.record?.FamilyMember?._id || "") : "self",
       });
 
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      const filename = `diagnosis-report-${downloadId}.pdf`;
-      pdf.save(filename);
+      await downloadPdfBlob({
+        url: downloadUrl,
+        filename: `diagnosis-report-${downloadId}.pdf`,
+      });
     } catch (error) {
       console.error("Diagnosis report download failed", error);
       alert("Failed to download diagnosis report");
     } finally {
       setDownloadingDiagnosisId("");
-      setExportDiagnosisReport(null);
     }
-  };
-
-  const buildPrescriptionPreviewData = (record = {}) => {
-    const height = getMetricValue(record, "Height");
-    const weight = getMetricValue(record, "Weight");
-    const bmi = getMetricValue(record, "BMI");
-
-    return {
-      hospital: {
-        name: record?.instituteDisplayName || record?.Institute?.Institute_Name || instituteName || "SARCPL",
-        address: "",
-        contact: "",
-        email: "",
-        logo: "",
-      },
-      patient: {
-        name: getPrescriptionReportForLabel(record),
-        age: "",
-        gender: record?.Employee?.Gender || "",
-        absNo: selectedEmployee?.ABS_NO || employeeProfile?.ABS_NO || "",
-        mrn: record?.Employee?._id || "",
-        bloodGroup: record?.Employee?.Blood_Group || "",
-      },
-      encounter: {
-        doctor: record?.Doctor?.Name || record?.created_by || "",
-        department: "",
-        date: getPrescriptionTimestamp(record),
-        visitType: "",
-        prescriptionId: record?.visit_id || record?._id || "",
-      },
-      vitals: {
-        bp: getMetricValue(record, "Blood_Pressure"),
-        pulse: getMetricValue(record, "Pulse"),
-        temperature: getMetricValue(record, "Temperature"),
-        spo2: getMetricValue(record, "Oxygen") || getMetricValue(record, "SpO2"),
-        height,
-        weight,
-        bmi,
-      },
-      investigations: {
-        tests: record?.relatedTests || [],
-        xrays: (record?.relatedXrays || [])
-          .map((xray) => xray?.Xray_Type || xray?.Xray_ID || "")
-          .filter(Boolean),
-        notes: "",
-      },
-      diagnosis: {
-        primary: record?.doctorNotes || record?.data?.notes || "",
-        icd: "",
-        notes: record?.doctorNotes || record?.data?.notes || "",
-      },
-      prescriptions: getPrescriptionMedicines(record).map((medicine) => ({
-        name: medicine?.Medicine_Name || "",
-        dosage: medicine?.Strength || medicine?.dosage || "",
-        frequency: [
-          medicine?.Morning ? "Morning" : null,
-          medicine?.Afternoon ? "Afternoon" : null,
-          medicine?.Night ? "Night" : null,
-        ].filter(Boolean).join("/") || (medicine?.Frequency || medicine?.Type || ""),
-        duration: medicine?.Duration || "",
-        instructions: medicine?.Remarks || medicine?.FoodTiming || "",
-      })),
-      qrUrl: null,
-    };
   };
 
   const downloadPrescriptionReport = async (record) => {
@@ -284,44 +188,21 @@ const DoctorPrescriptionForm = () => {
 
     try {
       setDownloadingPrescriptionId(downloadId);
-      setExportPrescriptionReport(record);
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const element = prescriptionExportRef.current;
-      if (!element) throw new Error("Unable to generate prescription report preview");
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
+      const downloadUrl = buildReportDownloadUrl(BACKEND_URL, "prescription-api", {
+        recordId: record?._id || "",
+        employeeId: selectedEmployee?._id || "",
+        personId: record?.IsFamilyMember ? (record?.FamilyMember?._id || "") : "self",
       });
 
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`prescription-report-${downloadId}.pdf`);
+      await downloadPdfBlob({
+        url: downloadUrl,
+        filename: `prescription-report-${downloadId}.pdf`,
+      });
     } catch (error) {
       console.error("Prescription report download failed", error);
       alert("Failed to download prescription report");
     } finally {
       setDownloadingPrescriptionId("");
-      setExportPrescriptionReport(null);
     }
   };
 
@@ -339,49 +220,20 @@ const DoctorPrescriptionForm = () => {
 
     try {
       setDownloadingXrayId(downloadId);
-      setExportXrayReport(report);
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const element = xrayExportRef.current;
-      if (!element) {
-        throw new Error("X-ray report preview not ready");
-      }
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
+      const downloadUrl = buildReportDownloadUrl(BACKEND_URL, "xray-api", {
+        recordId: report?.record?._id || report?._id || "",
+        employeeId: selectedEmployee?._id || "",
+        personId: report?.record?.IsFamilyMember ? (report?.record?.FamilyMember?._id || "") : "self",
       });
 
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 8;
-      const renderWidth = pageWidth - margin * 2;
-      const renderHeight = (canvas.height * renderWidth) / canvas.width;
-      const printableHeight = pageHeight - margin * 2;
-
-      let remainingHeight = renderHeight;
-      let yOffset = margin;
-
-      pdf.addImage(imageData, "PNG", margin, yOffset, renderWidth, renderHeight, undefined, "FAST");
-      remainingHeight -= printableHeight;
-
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yOffset = margin - (renderHeight - remainingHeight);
-        pdf.addImage(imageData, "PNG", margin, yOffset, renderWidth, renderHeight, undefined, "FAST");
-        remainingHeight -= printableHeight;
-      }
-
-      pdf.save(`Xray_Report_${downloadId.slice(-6)}.pdf`);
+      await downloadPdfBlob({
+        url: downloadUrl,
+        filename: `Xray_Report_${downloadId.slice(-6)}.pdf`,
+      });
     } catch (err) {
       console.error("X-ray report download failed:", err);
       alert("Unable to download x-ray report");
     } finally {
-      setExportXrayReport(null);
       setDownloadingXrayId("");
     }
   };
@@ -1185,6 +1037,7 @@ const DoctorPrescriptionForm = () => {
     e.preventDefault();
     if (isSubmittingPrescription) return;
     setPrescriptionSuccessMessage("");
+    setPrescriptionErrorMessage("");
 
     if (!formData.Employee_ID) {
       alert("Please select an employee");
@@ -1204,7 +1057,9 @@ const DoctorPrescriptionForm = () => {
         await submitPendingXrays();
       } catch (err) {
         console.error("Failed to auto-submit pending diagnostics", err);
-        alert("Unable to submit tests or x-rays with the prescription");
+        const message = err?.response?.data?.error || err?.response?.data?.message || "Unable to submit tests or x-rays with the prescription.";
+        setPrescriptionErrorMessage(message);
+        alert(`❌ ${message}`);
         return;
       }
 
@@ -1334,7 +1189,9 @@ const DoctorPrescriptionForm = () => {
     } catch (err) {
       console.error("Failed to submit prescription", err);
       const backendError = err?.response?.data?.error || err?.response?.data?.message;
-      alert(`❌ ${backendError || "Failed to submit prescription"}`);
+      const message = backendError || "Failed to submit prescription";
+      setPrescriptionErrorMessage(message);
+      alert(`❌ ${message}`);
     } finally {
       setIsSubmittingPrescription(false);
     }
@@ -2015,6 +1872,11 @@ const DoctorPrescriptionForm = () => {
           <strong>Submitted:</strong> {prescriptionSuccessMessage}
         </div>
       ) : null}
+      {prescriptionErrorMessage ? (
+        <div className="alert alert-danger shadow-sm mb-3" role="alert">
+          <strong>Cannot save prescription:</strong> {prescriptionErrorMessage}
+        </div>
+      ) : null}
       {/* Back Button */}
       <button
         className="btn mb-3"
@@ -2280,9 +2142,11 @@ const DoctorPrescriptionForm = () => {
                 </div>
 
                 <div className="modal-body p-0">
-                  <div className="d-flex justify-content-center p-3 overflow-auto">
-                    <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
-                  </div>
+                  <ReportHtmlPreview
+                    modulePath="xray-api"
+                    report={selectedXrayReport}
+                    title="X-ray report preview"
+                  />
                 </div>
 
                 <div className="modal-footer">
@@ -2326,9 +2190,14 @@ const DoctorPrescriptionForm = () => {
                 </div>
 
                 <div className="modal-body p-0">
-                  <div className="d-flex justify-content-center p-3 overflow-auto">
-                    <SARCPLPrescriptionReport reportData={buildPrescriptionPreviewData(selectedPrescriptionReport)} panels={diagnosticPanels} />
-                  </div>
+                  <ReportHtmlPreview
+                    modulePath="prescription-api"
+                    report={selectedPrescriptionReport}
+                    params={{
+                      source: selectedPrescriptionReport?.Source || "",
+                    }}
+                    title="Prescription report preview"
+                  />
                 </div>
 
                 <div className="modal-footer">
@@ -3401,9 +3270,11 @@ const DoctorPrescriptionForm = () => {
               </div>
 
               <div className="modal-body p-0">
-                <div className="d-flex justify-content-center p-3 overflow-auto">
-                  <DiagnosisReportPreview reportData={selectedDiagnosisReport} resolveUrl={resolveUrl} panels={diagnosticPanels} />
-                </div>
+                <ReportHtmlPreview
+                  modulePath="diagnosis-api"
+                  report={selectedDiagnosisReport}
+                  title="Diagnosis report preview"
+                />
               </div>
 
               <div className="modal-footer">
@@ -3453,9 +3324,11 @@ const DoctorPrescriptionForm = () => {
               </div>
 
               <div className="modal-body p-0">
-                <div className="d-flex justify-content-center p-3 overflow-auto">
-                  <XrayReportPreview reportData={selectedXrayReport} resolveUrl={resolveUrl} />
-                </div>
+                <ReportHtmlPreview
+                  modulePath="xray-api"
+                  report={selectedXrayReport}
+                  title="X-ray report preview"
+                />
               </div>
 
               <div className="modal-footer">
@@ -3487,33 +3360,6 @@ const DoctorPrescriptionForm = () => {
           </div>
         </div>
       )}
-
-      <div
-        style={{
-          position: "fixed",
-          left: "-10000px",
-          top: 0,
-          width: "210mm",
-          pointerEvents: "none",
-          zIndex: -1,
-        }}
-      >
-        {exportXrayReport && (
-          <div ref={xrayExportRef}>
-            <XrayReportPreview reportData={exportXrayReport} resolveUrl={resolveUrl} />
-          </div>
-        )}
-        {exportDiagnosisReport && (
-          <div ref={diagnosisExportRef}>
-            <DiagnosisReportPreview reportData={exportDiagnosisReport} resolveUrl={resolveUrl} panels={diagnosticPanels} />
-          </div>
-        )}
-        {exportPrescriptionReport && (
-          <div ref={prescriptionExportRef}>
-            <SARCPLPrescriptionReport reportData={buildPrescriptionPreviewData(exportPrescriptionReport)} panels={diagnosticPanels} />
-          </div>
-        )}
-      </div>
     </div>
   );
 };

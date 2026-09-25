@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from "react";
 import axios from "axios";
 import "./InstitutesTheme.css";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 
 const InstituteReports = () => {
 
@@ -381,26 +382,6 @@ const InstituteReports = () => {
                       </div>
                     </div>
 
-                    <div className="table-responsive">
-                      <table className="table table-bordered align-middle mb-0">
-                        <thead style={{ background: "#f3f4f6" }}>
-                          <tr>
-                            <th>Test</th>
-                            <th>Result</th>
-                            <th>Remarks</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(rec.Tests || []).map((t, j) => (
-                            <tr key={j}>
-                              <td>{t.Test_Name}</td>
-                              <td>{t.Result_Value}</td>
-                              <td>{t.Remarks || "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 ))}
               </div>
@@ -440,28 +421,12 @@ const InstituteReports = () => {
                       <button type="button" className="btn-close btn-close-white" onClick={() => setShowRecModal(false)} />
                     </div>
 
-                    <div className="modal-body">
-                      <p><strong>Institute:</strong> {selectedDiagnosisRec.Institute?.Institute_Name || report.employee?.Institute_Name || '-'}</p>
-                      <p><strong>Date:</strong> {new Date(selectedDiagnosisRec.updatedAt || selectedDiagnosisRec.createdAt || Date.now()).toLocaleString()}</p>
-
-                      <table className="table table-bordered">
-                        <thead className="table-light">
-                          <tr>
-                            <th>Test Name</th>
-                            <th>Result</th>
-                            <th>Remarks</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(selectedDiagnosisRec.Tests || []).map((t, i) => (
-                            <tr key={i}>
-                              <td>{t.Test_Name}</td>
-                              <td>{t.Result_Value} {t.Units || ''}</td>
-                              <td>{t.Remarks || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="modal-body p-0">
+                      <ReportHtmlPreview
+                        modulePath="diagnosis-api"
+                        report={selectedDiagnosisRec}
+                        title="Diagnosis report preview"
+                      />
 
                       {selectedDiagnosisRec.Reports && selectedDiagnosisRec.Reports.length > 0 && (
                         <div className="mt-3">
@@ -592,34 +557,22 @@ const InstituteReports = () => {
             </h6>
   
             {report.familyDiagnosis?.length ? (
-              <div className="table-responsive">
-                <table className="table table-bordered align-middle">
-                  <thead style={{ background: "#f3f4f6" }}>
-                    <tr>
-                      <th>Member</th>
-                      <th>Test</th>
-                      <th>Result</th>
-                      <th>Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.familyDiagnosis.flatMap((rec, i) =>
-                      rec.Tests.map((t, j) => (
-                        <tr key={`${i}-${j}`}>
-                          <td>
-                            {rec.FamilyMember?.Name} (
-                            {rec.FamilyMember?.Relationship})
-                          </td>
-                          <td>{t.Test_Name}</td>
-                          <td>{t.Result_Value}</td>
-                          <td>
-                            {new Date(t.Timestamp).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+              <div>
+                {report.familyDiagnosis.map((rec, idx) => (
+                  <div key={rec._id || idx} className="d-flex justify-content-between align-items-center border-bottom py-2">
+                    <span>
+                      {rec.FamilyMember?.Name || "Family member"} · {new Date(rec.Timestamp || Date.now()).toLocaleDateString()}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => viewRecord(rec)}
+                      disabled={loadingRec}
+                    >
+                      View Report
+                    </button>
+                  </div>
+                ))}
               </div>
             ) : (
               <p style={{ color: "#6b7280" }}>

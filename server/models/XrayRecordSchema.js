@@ -15,6 +15,12 @@ const XrayRecordSchema = new Schema(
     required: true
   },
 
+  Visit: {
+    type: Schema.Types.ObjectId,
+    ref: "DailyVisit",
+    default: null
+  },
+
   IsFamilyMember: {
     type: Boolean,
     default: false

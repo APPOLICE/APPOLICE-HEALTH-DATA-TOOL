@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 import "bootstrap/dist/css/bootstrap.min.css";
 import PatientSelector from "../institutes/PatientSelector";
 import "./PharmacyPrescriptionForm.css";
@@ -25,6 +26,7 @@ const PharmacyPrescriptionForm = () => {
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [employeeReport, setEmployeeReport] = useState(null);
   const [showReports, setShowReports] = useState(false);
+  const [selectedDiagnosisReport, setSelectedDiagnosisReport] = useState(null);
   const [masterMap, setMasterMap] = useState({});
   const [showDoctorNotes, setShowDoctorNotes] = useState({});
 
@@ -999,20 +1001,19 @@ const handleSubmit = async (e) => {
       )}
 
       {/* LAB TEST REPORTS */}
-      {employeeReport.tests?.length > 0 && (
+      {employeeReport.employeeDiagnosis?.length > 0 && (
         <div>
           <h6 className="fw-bold">Lab Reports</h6>
-
-          {employeeReport.tests.map((t, idx) => (
-            <div key={idx} className="border rounded p-2 mb-2 small">
-              <div><strong>{t.Test_Name}</strong></div>
-              <div>Result: {t.Result_Value}</div>
-              {t.Reference_Range && (
-                <div>Ref Range: {t.Reference_Range}</div>
-              )}
-              {t.Units && (
-                <div>Units: {t.Units}</div>
-              )}
+          {employeeReport.employeeDiagnosis.map((record, idx) => (
+            <div key={record._id || idx} className="d-flex justify-content-between align-items-center border-bottom py-2 small">
+              <span>{record.Timestamp ? formatDateDMY(record.Timestamp) : `Report ${idx + 1}`}</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary"
+                onClick={() => setSelectedDiagnosisReport(record)}
+              >
+                View Report
+              </button>
             </div>
           ))}
         </div>
@@ -1020,6 +1021,26 @@ const handleSubmit = async (e) => {
     </>
   )}
 </div>
+
+{selectedDiagnosisReport && (
+  <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)" }}>
+    <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div className="modal-content">
+        <div className="modal-header bg-primary text-white">
+          <h5 className="modal-title">Diagnosis Report</h5>
+          <button type="button" className="btn-close btn-close-white" onClick={() => setSelectedDiagnosisReport(null)} />
+        </div>
+        <div className="modal-body p-0">
+          <ReportHtmlPreview
+            modulePath="diagnosis-api"
+            report={selectedDiagnosisReport}
+            title="Diagnosis report preview"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
             </div>
           </div>
@@ -1154,46 +1175,48 @@ const handleSubmit = async (e) => {
                               </button>
                             </div>
 
-                            <table className="table table-sm table-bordered">
-                              <thead>
-                                <tr>
-                                  <th>Medicine</th>
-                                  <th>Type</th>
-                                  <th>Food Timing</th>
-                                  <th>Strength</th>
-                                  <th>Morning</th>
-                                  <th>Afternoon</th>
-                                  <th>Night</th>
-                                  <th>Duration</th>
-                                  <th>Remarks</th>
-                                  <th>Action</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {prescription.data.medicines.map((medicine, mIdx) => (
-                                  <tr key={mIdx}>
-                                    <td>{medicine.Medicine_Name}</td>
-                                    <td>{medicine.Type || "-"}</td>
-                                    <td>{medicine.FoodTiming || "-"}</td>
-                                    <td>{medicine.Strength || "-"}</td>
-                                    <td>{medicine.Morning || "0"}</td>
-                                    <td>{medicine.Afternoon || "0"}</td>
-                                    <td>{medicine.Night || "0"}</td>
-                                    <td>{medicine.Duration || "-"}</td>
-                                    <td>{medicine.Remarks || "-"}</td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn btn-sm btn-success"
-                                        onClick={() => addDoctorPrescribedMedicine(medicine)}
-                                      >
-                                        Add to Prescription
-                                      </button>
-                                    </td>
+                            <div className="doctor-prescription-table-wrap" role="region" aria-label="Doctor prescribed medicines">
+                              <table className="table table-sm table-bordered doctor-prescription-table">
+                                <thead>
+                                  <tr>
+                                    <th>Medicine</th>
+                                    <th>Type</th>
+                                    <th>Food Timing</th>
+                                    <th>Strength</th>
+                                    <th>Morning</th>
+                                    <th>Afternoon</th>
+                                    <th>Night</th>
+                                    <th>Duration</th>
+                                    <th>Remarks</th>
+                                    <th>Action</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {prescription.data.medicines.map((medicine, mIdx) => (
+                                    <tr key={mIdx}>
+                                      <td>{medicine.Medicine_Name}</td>
+                                      <td>{medicine.Type || "-"}</td>
+                                      <td>{medicine.FoodTiming || "-"}</td>
+                                      <td>{medicine.Strength || "-"}</td>
+                                      <td>{medicine.Morning || "0"}</td>
+                                      <td>{medicine.Afternoon || "0"}</td>
+                                      <td>{medicine.Night || "0"}</td>
+                                      <td>{medicine.Duration || "-"}</td>
+                                      <td>{medicine.Remarks || "-"}</td>
+                                      <td>
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-success doctor-prescription-action"
+                                          onClick={() => addDoctorPrescribedMedicine(medicine)}
+                                        >
+                                          Add to Prescription
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
 
                             {prescription.data.notes && (
                               <div className="mt-2">

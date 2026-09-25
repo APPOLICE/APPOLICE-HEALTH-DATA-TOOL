@@ -12,6 +12,17 @@ const DailyVisit = require("../models/daily_visit");
 // 🔴 IMPORTANT: THIS IS NOW SUBSTORE STOCK
 const Medicine = require("../models/master_medicine");
 const { normalizePatientMetrics } = require("../utils/healthMetrics");
+const {
+  generateSingleReportPdf,
+  generateCombinedReportPdf,
+  buildReportHtml,
+} = require("../utils/reportLayout");
+const {
+  ensureStoredReportPdf,
+  sendStoredReportPdf,
+  storeReportPdf,
+} = require("../utils/storedReportPdf");
+const { hydratePrescriptionInvestigations } = require("../utils/prescriptionInvestigations");
 
 const getPatientMetrics = async ({ employeeId, isFamilyMember, familyMemberId }) => {
   const patient = isFamilyMember && familyMemberId
@@ -93,6 +104,16 @@ const normalizeMedicineRows = (medicines) =>
     Medicine_ID: medicine?.Medicine_ID || null,
     Medicine_Name: medicine?.Medicine_Name || "-",
     Strength: medicine?.Strength || "",
+    Medicine_Type: medicine?.Medicine_Type || medicine?.Type || medicine?.medicineType || "",
+    Type: medicine?.Type || medicine?.Medicine_Type || medicine?.medicineType || "",
+    Dosage_Form: medicine?.Dosage_Form || medicine?.dosageForm || "",
+    FoodTiming: medicine?.FoodTiming || medicine?.foodTiming || "",
+    Frequency: medicine?.Frequency || medicine?.frequency || "",
+    Morning: Boolean(medicine?.Morning),
+    Afternoon: Boolean(medicine?.Afternoon),
+    Night: Boolean(medicine?.Night),
+    Duration: medicine?.Duration || medicine?.duration || "",
+    Remarks: medicine?.Remarks || medicine?.remarks || "",
     Quantity: Number(medicine?.Quantity || 0)
   }));
 
@@ -190,6 +211,122 @@ const buildDoctorPrescriptionRecord = (action, visitMap, employeeMap, familyMap)
   };
 };
 
+const populatePrescriptionActionRecord = async (action) => {
+  if (!action) return null;
+
+  const familyId = action?.data?.FamilyMember_ID || action?.data?.family_member_id || null;
+  const isFamilyMember = action?.data?.IsFamilyMember ?? action?.data?.is_family_member ?? false;
+
+  const [visit, employee, familyMember] = await Promise.all([
+    action?.visit_id
+      ? DailyVisit.findById(action.visit_id).populate("Institute_ID", "Institute_Name").lean()
+      : Promise.resolve(null),
+    action?.employee_id
+      ? Employee.findById(action.employee_id).select("_id Name ABS_NO DOB Gender Blood_Group Height Weight BMI").lean()
+      : Promise.resolve(null),
+    familyId
+      ? FamilyMember.findById(familyId).select("_id Name Relationship DOB Gender Blood_Group Height Weight BMI").lean()
+      : Promise.resolve(null)
+  ]);
+
+  const record = buildDoctorPrescriptionRecord(
+    action,
+    new Map(visit ? [[String(visit._id), visit]] : []),
+    new Map(employee ? [[String(employee._id), employee]] : []),
+    new Map(familyMember ? [[String(familyMember._id), familyMember]] : [])
+  );
+
+  return record
+    ? {
+        record: await hydratePrescriptionInvestigations(record),
+        source: "medical_action"
+      }
+    : null;
+};
+
+const resolveSinglePrescriptionDownloadRecord = async ({ recordId, sourceHint }) => {
+  const normalizedRecordId = String(recordId || "").trim();
+  if (!normalizedRecordId) return null;
+
+  const loadPrescription = async () =>
+    Prescription.findById(normalizedRecordId)
+      .populate("Employee", "Name ABS_NO DOB Gender Blood_Group")
+      .populate("FamilyMember", "Name Relationship DOB Gender Blood_Group")
+      .populate("Institute", "Institute_Name")
+      .lean();
+
+  const loadAction = async () =>
+    MedicalAction.findById(normalizedRecordId)
+      .lean();
+
+  const loadPrescriptionByVisit = async () =>
+    Prescription.findOne({ visit_id: normalizedRecordId })
+      .populate("Employee", "Name ABS_NO DOB Gender Blood_Group")
+      .populate("FamilyMember", "Name Relationship DOB Gender Blood_Group")
+      .populate("Institute", "Institute_Name")
+      .lean();
+
+  const loadActionByVisit = async () =>
+    MedicalAction.findOne({
+      visit_id: normalizedRecordId,
+      action_type: "DOCTOR_PRESCRIPTION"
+    })
+      .sort({ created_at: -1 })
+      .lean();
+
+  const lookupOrder = sourceHint === "DOCTOR_PRESCRIPTION"
+    ? ["action", "prescription", "actionByVisit", "prescriptionByVisit"]
+    : sourceHint === "PHARMACY_ISSUE"
+      ? ["prescription", "action", "prescriptionByVisit", "actionByVisit"]
+      : ["prescription", "action", "prescriptionByVisit", "actionByVisit"];
+
+  for (const step of lookupOrder) {
+    if (step === "prescription") {
+      const prescription = await loadPrescription();
+      if (prescription) {
+        return {
+          record: await hydratePrescriptionInvestigations({
+            ...prescription,
+            Source: prescription.Source || "PRESCRIPTION"
+          }),
+          source: "prescription"
+        };
+      }
+    }
+
+    if (step === "action") {
+      const action = await loadAction();
+      if (action && action.action_type === "DOCTOR_PRESCRIPTION") {
+        const resolved = await populatePrescriptionActionRecord(action);
+        if (resolved) return resolved;
+      }
+    }
+
+    if (step === "prescriptionByVisit") {
+      const prescription = await loadPrescriptionByVisit();
+      if (prescription) {
+        return {
+          record: await hydratePrescriptionInvestigations({
+            ...prescription,
+            Source: prescription.Source || "PRESCRIPTION"
+          }),
+          source: "prescription_by_visit"
+        };
+      }
+    }
+
+    if (step === "actionByVisit") {
+      const action = await loadActionByVisit();
+      if (action) {
+        const resolved = await populatePrescriptionActionRecord(action);
+        if (resolved) return resolved;
+      }
+    }
+  }
+
+  return null;
+};
+
 const fetchCombinedPrescriptionHistory = async ({ employeeId, personId, fromDate, toDate }) => {
   const familyMembers = await FamilyMember.find({ Employee: employeeId }).select("_id Name Relationship Height Weight BMI").lean();
   const familyIds = familyMembers.map((member) => member._id);
@@ -279,10 +416,10 @@ const fetchCombinedPrescriptionHistory = async ({ employeeId, personId, fromDate
     return !issuedVisitIds.has(String(sourceVisitId));
   });
 
-  const hydratedPrescriptions = prescriptions.map((record) => {
+  const hydratedPrescriptions = await Promise.all(prescriptions.map(async (record) => {
     const visit = record?.visit_id ? visitMap.get(String(record.visit_id)) || null : null;
 
-    return {
+    return hydratePrescriptionInvestigations({
       ...record,
       VisitSummary: visit
         ? {
@@ -295,8 +432,8 @@ const fetchCombinedPrescriptionHistory = async ({ employeeId, personId, fromDate
         record.IsFamilyMember ? record.FamilyMember : record.Employee,
         visit?.Vitals || record.PatientMetrics || {}
       )
-    };
-  });
+    });
+  }));
 
   const combined = [...hydratedPrescriptions, ...dedupedActionRecords].filter((record) => matchesPersonFilter(record, personId));
 
@@ -482,6 +619,18 @@ prescriptionApp.post("/add",verifyToken,
 
     await prescriptionDoc.save();
 
+    const populatedPrescription = await Prescription.findById(prescriptionDoc._id)
+      .populate("Employee", "Name ABS_NO DOB Gender Blood_Group")
+      .populate("FamilyMember", "Name Relationship DOB Gender Blood_Group")
+      .populate("Institute", "Institute_Name")
+      .lean();
+    const reportRecord = await hydratePrescriptionInvestigations({
+      ...populatedPrescription,
+      Source: "PRESCRIPTION",
+      visit_id: prescriptionDoc.visit_id || null
+    });
+    await storeReportPdf("prescription", prescriptionDoc._id, reportRecord);
+
     await MedicalAction.create({
       employee_id: Employee_ID,
       visit_id: visit_id || null,
@@ -654,12 +803,46 @@ const fetchInventory = async (id) => {
   }
 };
 
-// Prescription PDF download
-const PDFDocument = require('pdfkit');
 prescriptionApp.get('/download-pdf', async (req, res) => {
   try {
-    const { employeeId, personId, fromDate, toDate } = req.query;
-    if (!employeeId) return res.status(400).json({ message: 'employeeId required' });
+    const { employeeId, personId, fromDate, toDate, recordId, source } = req.query;
+    if (!employeeId && !recordId) return res.status(400).json({ message: 'employeeId required' });
+
+    console.debug('Prescription /download-pdf request', {
+      recordId: String(recordId || ""),
+      sourceHint: source || "",
+      employeeId: employeeId || "",
+      personId: personId || "",
+      fromDate: fromDate || "",
+      toDate: toDate || ""
+    });
+
+    if (recordId) {
+      const resolved = await resolveSinglePrescriptionDownloadRecord({
+        recordId,
+        sourceHint: source
+      });
+      const record = resolved?.record || null;
+
+      if (!record) {
+        console.warn('Prescription record not available for download', {
+          recordId: String(recordId || ""),
+          sourceHint: source || ""
+        });
+        return res.status(404).json({ message: 'Prescription record not found' });
+      }
+
+      console.debug('Prescription /download-pdf resolved record', {
+        recordId: String(recordId || ""),
+        resolvedSource: resolved?.source || "unknown",
+        sourceField: record?.Source || ""
+      });
+
+      const filename = `Prescription_${recordId}.pdf`;
+      const filePath = await ensureStoredReportPdf('prescription', recordId, record);
+      return sendStoredReportPdf(res, filePath, filename, "attachment");
+    }
+
     const prescriptions = await fetchCombinedPrescriptionHistory({
       employeeId,
       personId: personId || "all",
@@ -667,81 +850,61 @@ prescriptionApp.get('/download-pdf', async (req, res) => {
       toDate
     });
 
-    const doc = new PDFDocument({ margin: 40 });
+    const combinedBuffer = await generateCombinedReportPdf('prescription', prescriptions);
+
     const filename = `Prescriptions_${employeeId}.pdf`;
     res.setHeader('Content-disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-type', 'application/pdf');
-    doc.pipe(res);
-
-    doc.fontSize(16).text('Prescription Records', { align: 'center' });
-    doc.moveDown(0.2);
-    doc.fontSize(10).text(`Date Range: ${fromDate || '-'} to ${toDate || '-'}`);
-    doc.moveDown(0.5);
-
-    if (!prescriptions || prescriptions.length === 0) {
-      doc.text('No prescriptions found for the selected criteria.', { align: 'center' });
-      doc.end();
-      return;
-    }
-
-    let y = doc.y + 8;
-    const pageBottom = () => doc.page.height - doc.page.margins.bottom;
-    const columnX = [40, 65, 175, 295, 445, 485];
-    const columnWidths = [25, 100, 110, 150, 40, 80];
-
-    const drawHeader = () => {
-      doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('#', columnX[0], y, { width: columnWidths[0] });
-      doc.text('Institute', columnX[1], y, { width: columnWidths[1] });
-      doc.text('Person', columnX[2], y, { width: columnWidths[2] });
-      doc.text('Medicine', columnX[3], y, { width: columnWidths[3] });
-      doc.text('Qty', columnX[4], y, { width: columnWidths[4] });
-      doc.text('Date', columnX[5], y, { width: columnWidths[5] });
-      y += 18;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#cccccc').stroke();
-      doc.font('Helvetica').fillColor('black');
-    };
-
-    drawHeader();
-
-    prescriptions.forEach((p, index) => {
-      const instituteText = p.Institute?.Institute_Name || '-';
-      const personText = p.IsFamilyMember
-        ? `${p.FamilyMember?.Name || '-'} (${p.FamilyMember?.Relationship || '-'})`
-        : 'Self';
-      const medicineText = (p.Medicines || []).map((m) => m.Medicine_Name).join(', ');
-      const qtyText = String((p.Medicines || []).reduce((acc, medicine) => acc + Number(medicine.Quantity || 0), 0));
-      const dateText = new Date(p.Timestamp).toLocaleString('en-IN');
-      const lineHeight = Math.max(
-        doc.heightOfString(String(index + 1), { width: columnWidths[0] }),
-        doc.heightOfString(instituteText, { width: columnWidths[1] }),
-        doc.heightOfString(personText, { width: columnWidths[2] }),
-        doc.heightOfString(medicineText, { width: columnWidths[3] }),
-        doc.heightOfString(qtyText, { width: columnWidths[4] }),
-        doc.heightOfString(dateText, { width: columnWidths[5] })
-      ) + 8;
-
-      if (y + lineHeight > pageBottom()) {
-        doc.addPage();
-        y = 40;
-        drawHeader();
-      }
-
-      doc.fontSize(10);
-      doc.text(String(index + 1), columnX[0], y, { width: columnWidths[0] });
-      doc.text(instituteText, columnX[1], y, { width: columnWidths[1] });
-      doc.text(personText, columnX[2], y, { width: columnWidths[2] });
-      doc.text(medicineText, columnX[3], y, { width: columnWidths[3] });
-      doc.text(qtyText, columnX[4], y, { width: columnWidths[4] });
-      doc.text(dateText, columnX[5], y, { width: columnWidths[5] });
-      y += lineHeight;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#e5e7eb').stroke();
-    });
-
-    doc.end();
+    return res.send(combinedBuffer);
   } catch (err) {
     console.error('Prescription PDF error:', err);
     res.status(500).json({ message: 'Failed to generate PDF', error: err.message });
+  }
+});
+
+prescriptionApp.get('/preview-html', async (req, res) => {
+  try {
+    const { recordId, source } = req.query;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const resolved = await resolveSinglePrescriptionDownloadRecord({
+      recordId,
+      sourceHint: source
+    });
+    const record = resolved?.record || null;
+
+    if (!record) {
+      return res.status(404).json({ message: 'Prescription record not found' });
+    }
+
+    res.setHeader('Content-type', 'text/html; charset=utf-8');
+    return res.send(buildReportHtml('prescription', record));
+  } catch (err) {
+    console.error('Prescription preview HTML error:', err);
+    res.status(500).json({ message: 'Failed to generate preview HTML', error: err.message });
+  }
+});
+
+prescriptionApp.get('/preview-pdf', async (req, res) => {
+  try {
+    const { recordId, source } = req.query;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const resolved = await resolveSinglePrescriptionDownloadRecord({
+      recordId,
+      sourceHint: source
+    });
+    const record = resolved?.record || null;
+
+    if (!record) {
+      return res.status(404).json({ message: 'Prescription record not found' });
+    }
+
+    const filePath = await ensureStoredReportPdf('prescription', recordId, record);
+    return sendStoredReportPdf(res, filePath, `Prescription_${recordId}.pdf`, "inline");
+  } catch (err) {
+    console.error('Prescription preview PDF error:', err);
+    res.status(500).json({ message: 'Failed to load preview PDF', error: err.message });
   }
 });
 

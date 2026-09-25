@@ -1,13 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import PersonFilterDropdown from "../common/PersonFilterDropdown";
 import { usePersonFilter } from "../../context/PersonFilterContext";
 import DateRangeFilter from "../common/DateRangeFilter";
 import PDFDownloadButton from "../common/PDFDownloadButton";
-import XrayReportPreview from "../institutes/XrayReportPreview";
+import { buildReportDownloadUrl, downloadPdfBlob } from "../../utils/pdfDownload";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 import "bootstrap/dist/css/bootstrap.min.css";
 
 const XrayReport = () => {
@@ -29,8 +28,6 @@ const XrayReport = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [downloadingId, setDownloadingId] = useState("");
-  const [exportReport, setExportReport] = useState(null);
-  const exportRef = useRef(null);
   const { selectedPersonId, setSelectedPersonId, options, loadingFamily } = usePersonFilter(employeeObjectId || employeeId);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -148,43 +145,22 @@ const XrayReport = () => {
 
     try {
       setDownloadingId(downloadId);
-      setExportReport(report);
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const element = exportRef.current;
-      if (!element) throw new Error("X-ray report preview not ready");
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
+      const downloadUrl = buildReportDownloadUrl(BACKEND_URL, "xray-api", {
+        recordId: report?._id || report?.record?._id || report?.record?.id || "",
+        employeeId: employeeId || employeeObjectId,
+        personId: selectedPersonId,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
       });
 
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`xray-report-${downloadId}.pdf`);
+      await downloadPdfBlob({
+        url: downloadUrl,
+        filename: `xray-report-${downloadId}.pdf`,
+      });
     } catch (error) {
       console.error("X-ray report download failed:", error);
       alert("Unable to download x-ray report");
     } finally {
-      setExportReport(null);
       setDownloadingId("");
     }
   };
@@ -387,9 +363,11 @@ const XrayReport = () => {
               </div>
 
               <div className="modal-body p-0">
-                <div className="d-flex justify-content-center p-3 overflow-auto">
-                  <XrayReportPreview reportData={selectedReport} resolveUrl={resolveUrl} />
-                </div>
+                <ReportHtmlPreview
+                  modulePath="xray-api"
+                  report={selectedReport}
+                  title="X-ray report preview"
+                />
               </div>
 
               <div className="modal-footer">
@@ -415,22 +393,6 @@ const XrayReport = () => {
         </div>
       )}
 
-      <div
-        style={{
-          position: "fixed",
-          left: "-10000px",
-          top: 0,
-          width: "210mm",
-          pointerEvents: "none",
-          zIndex: -1,
-        }}
-      >
-        {exportReport && (
-          <div ref={exportRef}>
-            <XrayReportPreview reportData={exportReport} resolveUrl={resolveUrl} />
-          </div>
-        )}
-      </div>
     </div>
   );
 };

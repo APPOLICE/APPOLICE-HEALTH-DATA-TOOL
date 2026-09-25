@@ -24,6 +24,17 @@ const {
   findMasterXrays,
   listMasterTests
 } = require("../utils/instituteMasterData");
+const {
+  generateSingleReportPdf,
+  generateCombinedReportPdf,
+  buildReportHtml,
+} = require("../utils/reportLayout");
+const {
+  ensureStoredReportPdf,
+  sendStoredReportPdf,
+  storeReportPdf,
+} = require("../utils/storedReportPdf");
+const { invalidatePrescriptionPdfsForEncounter } = require("../utils/prescriptionInvestigations");
 
 const parseDateInput = (value, endOfDay = false) => {
   if (!value) return null;
@@ -490,7 +501,8 @@ const {
   Employee_ID,
   IsFamilyMember,
   FamilyMember_ID,
-  Xray_Notes
+  Xray_Notes,
+  visit_id
 } = req.body;
 
 
@@ -596,6 +608,8 @@ Institute:Institute_ID,
 
 Employee:Employee_ID,
 
+Visit: mongoose.Types.ObjectId.isValid(visit_id) ? visit_id : null,
+
 IsFamilyMember:isFamily,
 
 FamilyMember:
@@ -613,6 +627,20 @@ Xray_Notes:Xray_Notes || ""
 /* ---------------- SAVE ---------------- */
 
 await record.save();
+
+await invalidatePrescriptionPdfsForEncounter({
+  employeeId: Employee_ID,
+  visitId: visit_id || null,
+  familyMemberId: isFamily && FamilyMember_ID ? FamilyMember_ID : null,
+  timestamp: new Date(),
+});
+
+const populatedRecord = await XrayRecord.findById(record._id)
+.populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+.populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+.populate('Institute', 'Institute_Name')
+.lean();
+await storeReportPdf('xray', record._id, populatedRecord);
 
 
 return res.status(201).json({
@@ -828,8 +856,6 @@ xrayApp.delete("/body-parts/:id", verifyToken, requireInstituteAdmin, async (req
   }
 });
 
-module.exports = xrayApp;
-
 // ✅ Get all diagnosis records for a person
 xrayApp.get("/records/:personId", async (req, res) => {
   try {
@@ -882,16 +908,26 @@ xrayApp.get("/records/:personId", async (req, res) => {
   }
 });
 
-module.exports = xrayApp;
-
-// module.exports = xrayApp;
-
-// Download PDF for xray records
-const PDFDocument = require('pdfkit');
 xrayApp.get('/download-pdf', async (req, res) => {
   try {
-    const { employeeId, personId, fromDate, toDate } = req.query;
-    if (!employeeId) return res.status(400).json({ message: 'employeeId required' });
+    const { employeeId, personId, fromDate, toDate, recordId } = req.query;
+    if (!employeeId && !recordId) return res.status(400).json({ message: 'employeeId required' });
+
+    if (recordId) {
+      const record = await XrayRecord.findById(recordId)
+        .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+        .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+        .populate('Institute', 'Institute_Name')
+        .lean();
+
+      if (!record) {
+        return res.status(404).json({ message: 'X-ray record not found' });
+      }
+
+      const filename = `Xray_Report_${recordId}.pdf`;
+      const filePath = await ensureStoredReportPdf('xray', recordId, record);
+      return sendStoredReportPdf(res, filePath, filename, "attachment");
+    }
 
     const filter = { Employee: employeeId };
     if (personId === "self") filter.IsFamilyMember = false;
@@ -918,81 +954,68 @@ xrayApp.get('/download-pdf', async (req, res) => {
     const filteredRecords = filterXrayRecordsByDate(records, start, end);
     const rows = splitXrayRecordsByDate(filteredRecords);
 
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const combinedBuffer = await generateCombinedReportPdf('xray', rows);
+
     const filename = `Xray_Reports_${employeeId}.pdf`;
     res.setHeader('Content-disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-type', 'application/pdf');
-    doc.pipe(res);
-
-    doc.fontSize(16).text('X-ray Reports', { align: 'center' });
-    doc.moveDown(0.2);
-    doc.fontSize(10).text(`Date Range: ${fromDate || '-'} to ${toDate || '-'}`);
-    doc.moveDown(0.5);
-
-    if (!rows || rows.length === 0) {
-      doc.text('No X-ray records found for the selected criteria.', { align: 'center' });
-      doc.end();
-      return;
-    }
-
-    let y = doc.y + 8;
-    const pageBottom = () => doc.page.height - doc.page.margins.bottom;
-    const columnX = [40, 65, 165, 275, 370, 430];
-    const columnWidths = [25, 95, 100, 95, 60, 120];
-
-    const drawHeader = () => {
-      doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('#', columnX[0], y, { width: columnWidths[0] });
-      doc.text('Patient', columnX[1], y, { width: columnWidths[1] });
-      doc.text('Report For', columnX[2], y, { width: columnWidths[2] });
-      doc.text('Institute', columnX[3], y, { width: columnWidths[3] });
-      doc.text('No. of X-rays', columnX[4], y, { width: columnWidths[4] });
-      doc.text('Test Date', columnX[5], y, { width: columnWidths[5] });
-      y += 18;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#cccccc').stroke();
-      doc.font('Helvetica').fillColor('black');
-    };
-
-    drawHeader();
-
-    rows.forEach((r, index) => {
-      const patientText = `${r.Employee?.Name || '-'}${r.Employee?.ABS_NO ? ` (${r.Employee.ABS_NO})` : ''}`;
-      const reportForText = r.IsFamilyMember
-        ? `${r.FamilyMember?.Name || '-'} (${r.FamilyMember?.Relationship || '-'})`
-        : 'Self';
-      const instituteText = r.Institute?.Institute_Name || 'Medical Institute';
-      const countText = String(Array.isArray(r.Xrays) ? r.Xrays.length : 0);
-      const dateText = formatPdfDateTime(r.Xrays[0]?.Timestamp || r.createdAt);
-
-      const lineHeight = Math.max(
-        doc.heightOfString(String(index + 1), { width: columnWidths[0] }),
-        doc.heightOfString(patientText, { width: columnWidths[1] }),
-        doc.heightOfString(reportForText, { width: columnWidths[2] }),
-        doc.heightOfString(instituteText, { width: columnWidths[3] }),
-        doc.heightOfString(countText, { width: columnWidths[4] }),
-        doc.heightOfString(dateText, { width: columnWidths[5] })
-      ) + 8;
-
-      if (y + lineHeight > pageBottom()) {
-        doc.addPage();
-        y = 40;
-        drawHeader();
-      }
-
-      doc.fontSize(10);
-      doc.text(String(index + 1), columnX[0], y, { width: columnWidths[0] });
-      doc.text(patientText, columnX[1], y, { width: columnWidths[1] });
-      doc.text(reportForText, columnX[2], y, { width: columnWidths[2] });
-      doc.text(instituteText, columnX[3], y, { width: columnWidths[3] });
-      doc.text(countText, columnX[4], y, { width: columnWidths[4] });
-      doc.text(dateText, columnX[5], y, { width: columnWidths[5] });
-      y += lineHeight;
-      doc.moveTo(40, y - 4).lineTo(555, y - 4).strokeColor('#e5e7eb').stroke();
-    });
-
-    doc.end();
+    return res.send(combinedBuffer);
   } catch (err) {
     console.error('Xray PDF error:', err);
     res.status(500).json({ message: 'Failed to generate PDF', error: err.message });
   }
 });
+
+const sendXrayPreviewHtml = async (req, res) => {
+  try {
+    const recordId = req.params.recordId || req.query.recordId || req.query.id;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const record = await XrayRecord.findById(recordId)
+      .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+      .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+      .populate('Institute', 'Institute_Name')
+      .lean();
+
+    if (!record) {
+      return res.status(404).json({ message: 'X-ray record not found' });
+    }
+
+    res.setHeader('Content-type', 'text/html; charset=utf-8');
+    return res.send(buildReportHtml('xray', record));
+  } catch (err) {
+    console.error('Xray preview HTML error:', err);
+    res.status(500).json({ message: 'Failed to generate preview HTML', error: err.message });
+  }
+};
+
+xrayApp.get('/preview-html', sendXrayPreviewHtml);
+xrayApp.get('/preview-html/:recordId', sendXrayPreviewHtml);
+
+const sendXrayPreviewPdf = async (req, res) => {
+  try {
+    const recordId = req.params.recordId || req.query.recordId || req.query.id;
+    if (!recordId) return res.status(400).json({ message: 'recordId required' });
+
+    const record = await XrayRecord.findById(recordId)
+      .populate('Employee', 'Name ABS_NO DOB Gender Blood_Group')
+      .populate('FamilyMember', 'Name Relationship DOB Gender Blood_Group')
+      .populate('Institute', 'Institute_Name')
+      .lean();
+
+    if (!record) {
+      return res.status(404).json({ message: 'X-ray record not found' });
+    }
+
+    const filePath = await ensureStoredReportPdf('xray', recordId, record);
+    return sendStoredReportPdf(res, filePath, `Xray_Report_${recordId}.pdf`, "inline");
+  } catch (err) {
+    console.error('Xray preview PDF error:', err);
+    res.status(500).json({ message: 'Failed to load preview PDF', error: err.message });
+  }
+};
+
+xrayApp.get('/preview-pdf', sendXrayPreviewPdf);
+xrayApp.get('/preview-pdf/:recordId', sendXrayPreviewPdf);
+
+module.exports = xrayApp;

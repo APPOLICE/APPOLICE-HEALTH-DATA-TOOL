@@ -35,6 +35,8 @@ const XrayEntryForm = () => {
   const [doctorXrays, setDoctorXrays] = useState([]);
   const [doctorXrayOrders, setDoctorXrayOrders] = useState([]);
   const [showDoctorNotes, setShowDoctorNotes] = useState({});
+  const [submitError, setSubmitError] = useState("");
+  const [invalidXrayIndexes, setInvalidXrayIndexes] = useState([]);
   const navigate = useNavigate();
 
   const xraySource = useMemo(() => mergeXrayTypes(xrayMaster), [xrayMaster]);
@@ -180,6 +182,8 @@ const XrayEntryForm = () => {
 
 
  const handleXrayChange = (index, field, value) => {
+  setSubmitError("");
+  setInvalidXrayIndexes((previous) => previous.filter((item) => item !== index));
   setFormData(prev => {
     const updated = [...prev.Xrays];
 
@@ -281,15 +285,45 @@ const XrayEntryForm = () => {
   const handleSubmit = async (e) => {
 
 e.preventDefault();
+setSubmitError("");
+setInvalidXrayIndexes([]);
+
+if (!formData.Employee_ID) {
+  setSubmitError("Please select a patient before saving the X-ray record.");
+  return;
+}
+
+if (formData.IsFamilyMember && !formData.FamilyMember_ID) {
+  setSubmitError("Please select a family member before saving the X-ray record.");
+  return;
+}
+
+const incompleteXrays = formData.Xrays
+  .map((xray, index) => ({ xray, index }))
+  .filter(({ xray }) =>
+    !String(xray?.Body_Part || "").trim() ||
+    !String(xray?.Xray_Type || "").trim() ||
+    !isValidFilmSize(xray?.Film_Size)
+  );
+
+if (incompleteXrays.length) {
+  setInvalidXrayIndexes(incompleteXrays.map(({ index }) => index));
+  const details = incompleteXrays.map(({ xray, index }) => {
+    const missing = [];
+    if (!String(xray?.Body_Part || "").trim()) missing.push("body part");
+    if (!String(xray?.Xray_Type || "").trim()) missing.push("X-ray test");
+    if (!isValidFilmSize(xray?.Film_Size)) missing.push("film size (for example 10X8)");
+    return `#${index + 1}: ${missing.join(", ")}`;
+  });
+  setSubmitError(`Complete the required X-ray fields before saving: ${details.join("; ")}.`);
+  return;
+}
 
 const invalidFilmSizeIndex = formData.Xrays.findIndex(
   (xray) => !isValidFilmSize(xray.Film_Size)
 );
 
-if (invalidFilmSizeIndex !== -1) {
-  alert(`Please enter a valid Film Size in format like 10X8 or 16X16 for X-ray #${invalidFilmSizeIndex + 1}`);
-  return;
-}
+if (invalidFilmSizeIndex !== -1) return;
 
 const fd = new FormData();
 
@@ -298,6 +332,7 @@ fd.append("Employee_ID",formData.Employee_ID);
 fd.append("IsFamilyMember",formData.IsFamilyMember);
 fd.append("FamilyMember_ID",formData.FamilyMember_ID);
 fd.append("Xray_Notes",formData.Xray_Notes);
+fd.append("visit_id", visitId || "");
 
 // send xray data
 fd.append("Xrays",JSON.stringify(formData.Xrays));
@@ -311,6 +346,7 @@ fd.append("reports",x.ReportFile);
 
 });
 
+try {
 await axios.post(
 `${BACKEND_URL}/xray-api/add`,
 fd,
@@ -321,7 +357,12 @@ headers:{
 }
 );
 
+await fetchPastRecords();
 alert("✅ Xray saved");
+} catch (err) {
+  console.error(err);
+  setSubmitError(err?.response?.data?.error || err?.response?.data?.message || "Failed to save X-ray record.");
+}
 
 };
 
@@ -523,6 +564,11 @@ alert("✅ Xray saved");
 
             <div className="card-body">
               <form onSubmit={handleSubmit}>
+                {submitError && (
+                  <div className="alert alert-danger" role="alert">
+                    <strong>Cannot save X-ray record.</strong> {submitError}
+                  </div>
+                )}
                 {/* Institute */}
                 <div className="mb-4">
                   <label className="form-label fw-semibold">🏥 Institute</label>
@@ -734,7 +780,7 @@ alert("✅ Xray saved");
                         <div className="col-md-4">
                           <label className="form-label fw-semibold">Body Part</label>
                           <select
-                            className="form-select"
+                            className={`form-select${invalidXrayIndexes.includes(i) && !String(x.Body_Part || "").trim() ? " is-invalid" : ""}`}
                             value={x.Body_Part || ""}
                             onChange={(e) => handleXrayChange(i, "Body_Part", e.target.value)}
                           >
@@ -750,7 +796,7 @@ alert("✅ Xray saved");
                         <div className="col-md-8">
                           <label className="form-label fw-semibold">X-ray Selection</label>
                           <select
-                            className="form-select"
+                            className={`form-select${invalidXrayIndexes.includes(i) && !String(x.Xray_Type || "").trim() ? " is-invalid" : ""}`}
                             value={x.Xray_ID || ""}
                             onChange={(e) => handleXrayChange(i, "Xray_ID", e.target.value)}
                             disabled={!x.Body_Part}
@@ -775,7 +821,7 @@ alert("✅ Xray saved");
                           <label className="form-label fw-semibold">Film Size</label>
                           <input
                             type="text"
-                            className="form-control"
+                            className={`form-control${invalidXrayIndexes.includes(i) && !isValidFilmSize(x.Film_Size) ? " is-invalid" : ""}`}
                             placeholder="10X8"
                             value={x.Film_Size}
                             onChange={(e) => handleXrayChange(i, "Film_Size", e.target.value)}

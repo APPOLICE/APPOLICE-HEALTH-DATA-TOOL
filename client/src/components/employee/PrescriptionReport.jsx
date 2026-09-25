@@ -1,13 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import PersonFilterDropdown from "../common/PersonFilterDropdown";
 import { usePersonFilter } from "../../context/PersonFilterContext";
 import DateRangeFilter from "../common/DateRangeFilter";
 import PDFDownloadButton from "../common/PDFDownloadButton";
-import SARCPLPrescriptionReport from "../institutes/SARCPLPrescriptionReport";
-import { fetchDiagnosticPanels } from "../../utils/masterData_clean";
+import { buildReportDownloadUrl, downloadPdfBlob } from "../../utils/pdfDownload";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 import "bootstrap/dist/css/bootstrap.min.css";
 
 const getFamilyMemberId = (row) => {
@@ -72,21 +70,6 @@ const getPrescriptionMedicines = (record) => {
       : [];
 
   return rows.map((medicine) => normalizeMedicineRow(medicine, medicine?._source || source));
-};
-
-const getPrescriptionVisitVitals = (record) => {
-  const vitals =
-    record?.VisitSummary?.Vitals ||
-    record?.Vitals ||
-    record?.PatientMetrics ||
-    {};
-
-  return {
-    bp: vitals?.Blood_Pressure || vitals?.bp || "",
-    pulse: vitals?.Pulse ?? vitals?.pulse ?? "",
-    temperature: vitals?.Temperature ?? vitals?.temperature ?? null,
-    spo2: vitals?.Oxygen ?? vitals?.spo2 ?? vitals?.SpO2 ?? "",
-  };
 };
 
 const calculateAgeFromDob = (dob) => {
@@ -290,10 +273,7 @@ const PrescriptionReport = () => {
   const [showModal, setShowModal] = useState(false);
   const [employeeProfile, setEmployeeProfile] = useState(null);
   const [familyMembers, setFamilyMembers] = useState([]);
-  const [exportPrescription, setExportPrescription] = useState(null);
   const [downloadingId, setDownloadingId] = useState("");
-  const exportRef = useRef(null);
-  const [diagnosticPanels, setDiagnosticPanels] = useState([]);
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:6100";
   const employeeObjectId = localStorage.getItem("employeeObjectId");
   const employeeId = localStorage.getItem("employeeId") || employeeObjectId;
@@ -311,19 +291,6 @@ const PrescriptionReport = () => {
     if (!employeeObjectId) return;
     fetchPrescriptions();
   }, [employeeObjectId, selectedPersonId, fromDate, toDate]);
-
-  useEffect(() => {
-    const loadPanels = async () => {
-      try {
-        const panels = await fetchDiagnosticPanels({ force: true, includeInactive: false });
-        setDiagnosticPanels(Array.isArray(panels) ? panels : []);
-      } catch (err) {
-        setDiagnosticPanels([]);
-      }
-    };
-
-    loadPanels();
-  }, []);
 
   useEffect(() => {
     if (!employeeObjectId) return;
@@ -346,88 +313,6 @@ const PrescriptionReport = () => {
     loadProfiles();
   }, [BACKEND_URL, employeeObjectId]);
 
-  const getPrescriptionReportForLabel = (record) => {
-    if (record?.IsFamilyMember) {
-      const familyId = getFamilyMemberId(record);
-      const familyProfile = familyMembers.find((member) => String(member?._id) === String(familyId));
-      const familyName = familyProfile?.Name || record?.FamilyMember?.Name || "Family Member";
-      const relationship = familyProfile?.Relationship || record?.FamilyMember?.Relationship || "";
-      return relationship ? `${familyName} (${relationship})` : familyName;
-    }
-    return employeeProfile?.Name || record?.Employee?.Name || "Self";
-  };
-
-  const buildSarcplReportData = (prescription) => {
-    const familyId = getFamilyMemberId(prescription);
-    const familyProfile = prescription?.IsFamilyMember
-      ? familyMembers.find((member) => String(member?._id) === String(familyId)) || null
-      : null;
-    const patientProfile = prescription?.IsFamilyMember ? familyProfile : employeeProfile;
-    const visitVitals = getPrescriptionVisitVitals(prescription);
-    const patientMetrics = prescription?.VisitSummary?.Vitals || prescription?.PatientMetrics || {};
-
-    return {
-      hospital: {
-        name: prescription?.instituteDisplayName || prescription?.Institute?.Institute_Name || "SARCPL",
-        address: "",
-        contact: "",
-        email: "",
-        logo: "",
-      },
-      patient: {
-        name: getPrescriptionReportForLabel(prescription),
-        age: calculateAgeFromDob(patientProfile?.DOB),
-        gender: patientProfile?.Gender || "",
-        absNo: employeeProfile?.ABS_NO || prescription?.Employee?.ABS_NO || "",
-        mrn: patientProfile?._id || prescription?.Employee?._id || "",
-        bloodGroup: patientProfile?.Blood_Group || employeeProfile?.Blood_Group || "",
-      },
-      encounter: {
-        doctor: prescription?.doctor || prescription?.created_by || "",
-        department: prescription?.department || "",
-        date: getPrescriptionTimestamp(prescription),
-        visitType: prescription?.visit_type || prescription?.visitType || "",
-        prescriptionId: prescription?.visit_id || prescription?._id || prescription?.created_at || "",
-      },
-      vitals: {
-        bp: visitVitals.bp,
-        pulse: visitVitals.pulse,
-        temperature: visitVitals.temperature,
-        spo2: visitVitals.spo2,
-        height: patientProfile?.Height || employeeProfile?.Height || patientMetrics.Height || "",
-        weight: patientProfile?.Weight || employeeProfile?.Weight || patientMetrics.Weight || "",
-        bmi: patientProfile?.BMI || employeeProfile?.BMI || patientMetrics.BMI || "",
-      },
-      investigations: {
-        tests: prescription?.relatedTests || [],
-        xrays: (prescription?.relatedXrays || []).map((xray) => xray?.Xray_Type || xray?.Xray_ID || "").filter(Boolean),
-        notes: "",
-      },
-      diagnosis: {
-        primary: prescription?.doctorNotes || prescription?.data?.notes || "",
-        icd: prescription?.icd || "",
-        notes: prescription?.doctorNotes || prescription?.data?.notes || "",
-      },
-      prescriptions: getPrescriptionMedicines(prescription).map((medicine) => ({
-        name: medicine?.Medicine_Name || "",
-        dosage: medicine?.Strength || medicine?.dosage || "",
-        frequency: [
-          medicine?.Morning ? "Morning" : null,
-          medicine?.Afternoon ? "Afternoon" : null,
-          medicine?.Night ? "Night" : null,
-        ].filter(Boolean).join("/") || (medicine?.Frequency || medicine?.Type || ""),
-        duration: medicine?.Duration || "",
-        instructions: medicine?.Remarks || medicine?.FoodTiming || "",
-      })),
-      qrUrl: null,
-    };
-  };
-
-  const selectedReportData = useMemo(
-    () => (selectedPrescription ? buildSarcplReportData(selectedPrescription) : null),
-    [selectedPrescription, employeeProfile, familyMembers]
-  );
-
   const activeFamilyProfile = useMemo(() => {
     if (!selectedPersonId || selectedPersonId === "self" || selectedPersonId === "all") return null;
     return familyMembers.find((member) => String(member?._id) === String(selectedPersonId)) || null;
@@ -444,11 +329,6 @@ const PrescriptionReport = () => {
   const activePersonLastVisit = prescriptions.length > 0
     ? formatDate(getPrescriptionTimestamp(prescriptions[0]))
     : "—";
-
-  const exportReportData = useMemo(
-    () => (exportPrescription ? buildSarcplReportData(exportPrescription) : null),
-    [exportPrescription, employeeProfile, familyMembers]
-  );
 
   const fetchPrescriptions = async () => {
     setLoading(true);
@@ -508,47 +388,30 @@ const PrescriptionReport = () => {
 
   const downloadPrescriptionReport = async (prescription) => {
     try {
-      setDownloadingId(String(prescription?._id || prescription?.visit_id || "download"));
-      setExportPrescription(prescription);
-
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      const element = exportRef.current;
-      if (!element) {
-        throw new Error("Report preview not ready");
-      }
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
+      const recordId = String(prescription?._id || prescription?.visit_id || "");
+      console.debug("Prescription download clicked", {
+        recordId,
+        source: prescription?.Source || "",
+        visitId: prescription?.visit_id || "",
+      });
+      setDownloadingId(recordId || "download");
+      const downloadUrl = buildReportDownloadUrl(BACKEND_URL, "prescription-api", {
+        recordId,
+        source: prescription?.Source || "",
+        employeeId: employeeObjectId,
+        personId: selectedPersonId,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
       });
 
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 8;
-      const maxWidth = pageWidth - margin * 2;
-      const maxHeight = pageHeight - margin * 2;
-      let renderWidth = maxWidth;
-      let renderHeight = (canvas.height * renderWidth) / canvas.width;
-
-      if (renderHeight > maxHeight) {
-        renderHeight = maxHeight;
-        renderWidth = (canvas.width * renderHeight) / canvas.height;
-      }
-
-      const x = (pageWidth - renderWidth) / 2;
-      const y = margin;
-
-      pdf.addImage(imageData, "PNG", x, y, renderWidth, renderHeight, undefined, "FAST");
-      pdf.save(`Doctor_Prescription_${String(prescription?.visit_id || prescription?._id || "report").slice(-6)}.pdf`);
+      await downloadPdfBlob({
+        url: downloadUrl,
+        filename: `Doctor_Prescription_${String(prescription?.visit_id || prescription?._id || "report").slice(-6)}.pdf`,
+      });
     } catch (err) {
       console.error("Prescription report download failed:", err);
       alert("Unable to download prescription report");
     } finally {
-      setExportPrescription(null);
       setDownloadingId("");
     }
   };
@@ -844,7 +707,7 @@ const PrescriptionReport = () => {
         </div>
       </div>
 
-      {showModal && selectedPrescription && selectedReportData && (
+      {showModal && selectedPrescription && (
         <div className="modal fade show d-block" style={{ background: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: "90%" }}>
             <div className="modal-content border-0">
@@ -857,7 +720,14 @@ const PrescriptionReport = () => {
               </div>
 
               <div className="modal-body p-0">
-                <SARCPLPrescriptionReport reportData={selectedReportData} panels={diagnosticPanels} />
+                <ReportHtmlPreview
+                  modulePath="prescription-api"
+                  report={selectedPrescription}
+                  params={{
+                    source: selectedPrescription?.Source || "",
+                  }}
+                  title="Prescription report preview"
+                />
               </div>
 
               <div className="modal-footer">
@@ -885,22 +755,6 @@ const PrescriptionReport = () => {
         </div>
       )}
 
-      <div
-        style={{
-          position: "fixed",
-          left: "-10000px",
-          top: 0,
-          width: "210mm",
-          pointerEvents: "none",
-          zIndex: -1,
-        }}
-      >
-        {exportReportData && (
-          <div ref={exportRef}>
-            <SARCPLPrescriptionReport reportData={exportReportData} panels={diagnosticPanels} />
-          </div>
-        )}
-      </div>
     </div>
   );
 };
