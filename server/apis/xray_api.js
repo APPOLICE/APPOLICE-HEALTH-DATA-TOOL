@@ -575,9 +575,16 @@ xrays = xrays.map((item) => {
 /* ---------------- ATTACH FILES TO XRAYS ---------------- */
 
 const files = req.files || [];
+let reportFileIndexes = [];
+try {
+  reportFileIndexes = JSON.parse(req.body.reportFileIndexes || "[]");
+} catch {
+  reportFileIndexes = [];
+}
 
 for (let index = 0; index < xrays.length; index += 1) {
-  const file = files[index];
+  const fileIndex = reportFileIndexes.indexOf(index);
+  const file = files[fileIndex >= 0 ? fileIndex : index];
   if (!file?.buffer) continue;
   const uploaded = await uploadBufferToCloudinary(file.buffer, {
     folder: "xray_reports"

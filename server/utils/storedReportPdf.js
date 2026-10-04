@@ -1,11 +1,12 @@
 const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const { PDFDocument } = require("pdf-lib");
 
 const { generateSingleReportPdf } = require("./reportLayout");
 
 const REPORT_ROOT = path.join(__dirname, "..", "generated-reports");
-const REPORT_LAYOUT_VERSION = "times-v8-range-highlighting-flat-panel";
+const REPORT_LAYOUT_VERSION = "times-v9-xray-upload-append";
 const generationLocks = new Map();
 
 const getReportPdfPath = (reportType, recordId) =>
@@ -28,6 +29,70 @@ const getReportDataHash = (record) => crypto
   .update(JSON.stringify(record || {}))
   .digest("hex");
 
+const getUploadedXrayReports = (record = {}) => (Array.isArray(record?.Xrays) ? record.Xrays : [])
+  .flatMap((xray) => Array.isArray(xray?.Reports) ? xray.Reports : [])
+  .filter((report) => report?.url);
+
+const appendUploadedXrayReports = async (pdfBuffer, record) => {
+  const reports = getUploadedXrayReports(record);
+  if (!reports.length) return pdfBuffer;
+
+  const merged = await PDFDocument.load(pdfBuffer);
+  for (const report of reports) {
+    try {
+      const response = await fetch(report.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const filename = String(report.originalname || report.filename || "").toLowerCase();
+
+      if (contentType.includes("pdf") || filename.endsWith(".pdf")) {
+        const uploadedPdf = await PDFDocument.load(bytes);
+        const pages = await merged.copyPages(uploadedPdf, uploadedPdf.getPageIndices());
+        pages.forEach((page) => merged.addPage(page));
+        continue;
+      }
+
+      if (contentType.includes("png") || filename.endsWith(".png")) {
+        const image = await merged.embedPng(bytes);
+        appendImagePage(merged, image);
+        continue;
+      }
+
+      if (contentType.includes("jpeg") || contentType.includes("jpg") || /\.(jpe?g)$/.test(filename)) {
+        const image = await merged.embedJpg(bytes);
+        appendImagePage(merged, image);
+        continue;
+      }
+
+      console.warn(`[storedReportPdf] Skipping unsupported x-ray upload: ${report.originalname || report.filename || report.url}`);
+    } catch (error) {
+      console.warn(`[storedReportPdf] Could not append x-ray upload ${report.originalname || report.filename || report.url}: ${error.message}`);
+    }
+  }
+
+  return Buffer.from(await merged.save());
+};
+
+const appendImagePage = (document, image) => {
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 24;
+  const scale = Math.min(
+    (pageWidth - margin * 2) / image.width,
+    (pageHeight - margin * 2) / image.height
+  );
+  const width = image.width * scale;
+  const height = image.height * scale;
+  const page = document.addPage([pageWidth, pageHeight]);
+  page.drawImage(image, {
+    x: (pageWidth - width) / 2,
+    y: (pageHeight - height) / 2,
+    width,
+    height,
+  });
+};
+
 const storeReportPdf = async (reportType, recordId, record) => {
   if (!recordId) {
     throw new Error("recordId is required to store a report PDF");
@@ -35,7 +100,10 @@ const storeReportPdf = async (reportType, recordId, record) => {
 
   const filePath = getReportPdfPath(reportType, recordId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const pdfBuffer = await generateSingleReportPdf(reportType, record);
+  let pdfBuffer = await generateSingleReportPdf(reportType, record);
+  if (reportType === "xray") {
+    pdfBuffer = await appendUploadedXrayReports(pdfBuffer, record);
+  }
   await fs.writeFile(filePath, pdfBuffer);
   await fs.writeFile(
     getReportMetaPath(reportType, recordId),

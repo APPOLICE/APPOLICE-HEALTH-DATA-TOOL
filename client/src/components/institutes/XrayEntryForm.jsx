@@ -5,6 +5,7 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import { useNavigate } from "react-router-dom";
 import "./InstitutesTheme.css";
 import { mergeXrayTypes } from "../../data/xrayTypes";
+import ReportHtmlPreview from "../common/ReportHtmlPreview";
 
 const normalizeFilmSize = (value) => {
   const cleaned = String(value || "")
@@ -27,6 +28,7 @@ const XrayEntryForm = () => {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(null);
   const [pastRecords, setPastRecords] = useState([]);
+  const [selectedHistoryRecord, setSelectedHistoryRecord] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [tokenNumber, setTokenNumber] = useState(null);
   const [xrayTypes, setXrayTypes] = useState([]);
@@ -337,14 +339,17 @@ fd.append("visit_id", visitId || "");
 // send xray data
 fd.append("Xrays",JSON.stringify(formData.Xrays));
 
-// send files
+// send files and preserve which x-ray each upload belongs to
+const reportFileIndexes = [];
 formData.Xrays.forEach((x,i)=>{
 
 if(x.ReportFile){
 fd.append("reports",x.ReportFile);
+reportFileIndexes.push(i);
 }
 
 });
+fd.append("reportFileIndexes", JSON.stringify(reportFileIndexes));
 
 try {
 await axios.post(
@@ -485,61 +490,50 @@ alert("✅ Xray saved");
                   pastRecords.map((record, index) => (
                     <div
                       key={record._id || index}
-                      className="border-bottom pb-3 mb-3"
+                      className="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3 gap-2"
                     >
-                      <div className="text-muted small mb-2">
-                        📅 Date: {record?.createdAt ? formatDateDMY(record.createdAt) : "—"}
-                      </div>
-                      {record?.Xrays?.length > 0 ? (
-                        record.Xrays.map((x, i) => (
-                          <div key={i} className="mb-2 p-2 bg-light rounded">
-                            <div className="fw-semibold text-dark">
-                              {x?.Xray_Type || "X-ray"}
-                            </div>
-                            <small className="text-muted">
-                              {x?.Body_Part || "N/A"}
-                              {x?.View && ` (${x.View})`}
-                            </small>
-                            {x?.Findings && (
-                              <div className="small text-secondary mt-1">
-                                Findings: {x.Findings}
-                              </div>
-                            )}
-                            {x?.Impression && (
-                              <div className="small text-secondary">
-                                Impression: {x.Impression}
-                              </div>
-                            )}
-                            {x?.Reports?.length > 0 && (
-                              <div className="mt-2">
-                              {x.Reports.map((r,ri)=>(
-                              <a
-                              key={ri}
-                              href={resolveReportUrl(r?.url)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="btn btn-sm btn-outline-primary me-2"
-                              >
-                              📄 View Report
-                              </a>
-                              ))}
-                              </div>
-                              )}
-                          </div>
-                        ))
-                      ) : (
+                      <div>
                         <div className="text-muted small">
-                          No X-ray details available
+                          📅 Date: {record?.createdAt ? formatDateDMY(record.createdAt) : "—"}
                         </div>
-                      )}
-                      {record?.Xray_Notes && (
-                        <div className="mt-2 p-2 bg-light rounded small">
-                          📝 Notes: {record.Xray_Notes}
+                        <div className="small text-dark mt-1">
+                          {record?.Xrays?.length || 0} X-ray report{record?.Xrays?.length === 1 ? "" : "s"}
                         </div>
-                      )}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onClick={() => setSelectedHistoryRecord(record)}
+                      >
+                        View Report
+                      </button>
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedHistoryRecord && (
+          <div className="modal fade show d-block" style={{ background: "rgba(15,23,42,0.28)" }}>
+            <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+              <div className="modal-content">
+                <div className="modal-header bg-primary text-white">
+                  <h5 className="modal-title">X-ray Report</h5>
+                  <button
+                    type="button"
+                    className="btn-close btn-close-white"
+                    onClick={() => setSelectedHistoryRecord(null)}
+                  />
+                </div>
+                <div className="modal-body p-0">
+                  <ReportHtmlPreview
+                    modulePath="xray-api"
+                    report={selectedHistoryRecord}
+                    title="X-ray report preview"
+                  />
+                </div>
               </div>
             </div>
           </div>
