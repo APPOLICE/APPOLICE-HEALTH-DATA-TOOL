@@ -8,6 +8,7 @@ const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const AIQuery = require('../models/AIQuery');
 // Lazy-initialize Groq only when API key is available
 let groq = null;
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 if (process.env.GROQ_API_KEY) {
   groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   console.log('🤖 Groq AI initialized ✅');
@@ -76,7 +77,7 @@ Structured:`;
           content: preprocessPrompt
         }
       ],
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_MODEL,
       temperature: 0.3,
       max_tokens: 200,
     });
@@ -212,7 +213,7 @@ Remember: Return ONLY the JSON object, no other text.`;
           content: prompt
         }
       ],
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 2048,
     });
@@ -370,8 +371,9 @@ try {
 
   } catch (error) {
     console.error('❌ AI Query Error:', error);
-    res.status(500).json({ 
+    res.status(error.status >= 400 && error.status < 600 ? 502 : 500).json({
       error: error.message || 'Failed to process query',
+      code: error.code || 'AI_QUERY_FAILED',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
@@ -485,7 +487,7 @@ Return ONLY JSON in this format:
 
     /* ---------------- AI CALL ---------------- */
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 2048,
       messages: [{ role: "user", content: prompt }]
