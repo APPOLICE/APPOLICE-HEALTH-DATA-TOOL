@@ -1948,7 +1948,7 @@ const DoctorPrescriptionForm = () => {
 
                 {reportType === "diagnostic" && (
                   <>
-                    <h6 className="fw-bold text-dark mb-3">Recent Tests</h6>
+                    <h6 className="fw-bold text-dark mb-3">Previous Tests</h6>
                     {(() => {
                       const diagnosisRecords = employeeReport?.diagnosisRecords || [];
                       const recentTests = diagnosisRecords
@@ -1996,22 +1996,13 @@ const DoctorPrescriptionForm = () => {
                                 </div>
                               )}
 
-                              {test?.Reports && test.Reports.length > 0 ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-primary mt-2 me-2 view-action"
-                                  onClick={() => setSelectedDiagnosisReport({ record, test })}
-                                >
-                                  View Report
-                                </button>
-                              ) : (
-                                <button
-                                  className="btn btn-sm btn-outline-secondary mt-2"
-                                  disabled
-                                >
-                                  No Report
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-primary view-action"
+                                onClick={() => setSelectedDiagnosisReport({ record, test })}
+                              >
+                                View
+                              </button>
                             </div>
                           );
                         })
@@ -2024,7 +2015,7 @@ const DoctorPrescriptionForm = () => {
 
                 {reportType === "xray" && (
                   <>
-                    <h6 className="fw-bold text-dark mb-3">Recent X-rays</h6>
+                    <h6 className="fw-bold text-dark mb-3">Previous X-rays</h6>
                     {(() => {
                       const xrayRecords = employeeReport?.xrayRecords || [];
                       const recentXrays = xrayRecords
@@ -3295,12 +3286,12 @@ const DoctorPrescriptionForm = () => {
       {selectedDiagnosisReport && (
         <div
           className="modal fade show d-block"
-          style={{ background: "rgba(15,23,42,0.28)" }}
+          style={{ background: "rgba(15,23,42,0.28)", zIndex: 2050 }}
         >
-          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style={{ zIndex: 2060 }}>
             <div className="modal-content">
-              <div className="modal-header bg-primary text-white">
-                <h5 className="modal-title">Diagnosis Report</h5>
+              <div className="modal-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h5 className="modal-title mb-0">Diagnosis Report</h5>
                 <button
                   type="button"
                   className="btn-close btn-close-white"
