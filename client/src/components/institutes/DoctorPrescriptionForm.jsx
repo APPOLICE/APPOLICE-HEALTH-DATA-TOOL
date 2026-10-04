@@ -42,6 +42,7 @@ const DoctorPrescriptionForm = () => {
   });
   const [employeeReport, setEmployeeReport] = useState(null);
   const [showReports, setShowReports] = useState(false);
+  const [reportType, setReportType] = useState("diagnostic");
   const [selectedDiagnosisReport, setSelectedDiagnosisReport] = useState(null);
   const [selectedXrayReport, setSelectedXrayReport] = useState(null); // { record, xray }
   const [selectedPrescriptionReport, setSelectedPrescriptionReport] = useState(null);
@@ -1532,7 +1533,7 @@ const DoctorPrescriptionForm = () => {
       .sort((left, right) => new Date(getPrescriptionTimestamp(right) || 0) - new Date(getPrescriptionTimestamp(left) || 0));
   };
 
-  const loadEmployeeReports = async () => {
+  const loadEmployeeReports = async (requestedType = reportType) => {
     if (!selectedEmployee?._id) {
       alert("Please select an employee first");
       return;
@@ -1561,20 +1562,36 @@ const DoctorPrescriptionForm = () => {
       const payload = reportRes?.data || {};
       const diagnosisRows = Array.isArray(payload?.diagnosisRecords) ? payload.diagnosisRecords : [];
       const xrayRows = Array.isArray(payload?.xrayRecords) ? payload.xrayRecords : [];
+      const previousPrescriptions = getEnrichedPrescriptionHistory(
+        actionsRes?.data || [],
+        prescriptionRes?.data || [],
+        diagnosisRows,
+        xrayRows,
+        familyId
+      );
+
+      const sanitizedDiagnosisRecords = diagnosisRows.filter((record) => {
+        if (isFamily) {
+          return Boolean(record?.IsFamilyMember) && String(record?.FamilyMember || record?.FamilyMember_ID || "") === String(familyId || "");
+        }
+        return !record?.IsFamilyMember;
+      });
+
+      const sanitizedXrayRecords = xrayRows.filter((record) => {
+        if (isFamily) {
+          return Boolean(record?.IsFamilyMember) && String(record?.FamilyMember || record?.FamilyMember_ID || "") === String(familyId || "");
+        }
+        return !record?.IsFamilyMember;
+      });
 
       setEmployeeReport({
         ...payload,
         diseases: Array.isArray(payload?.diseases) ? payload.diseases : [],
-        diagnosisRecords: diagnosisRows,
-        xrayRecords: xrayRows,
-        previousPrescriptions: getEnrichedPrescriptionHistory(
-          actionsRes?.data || [],
-          prescriptionRes?.data || [],
-          diagnosisRows,
-          xrayRows,
-          familyId
-        )
+        diagnosisRecords: sanitizedDiagnosisRecords,
+        xrayRecords: sanitizedXrayRecords,
+        previousPrescriptions
       });
+      setReportType(requestedType);
       setShowReports(true);
     } catch (err) {
       console.error("Employee reports fetch error:", err);
@@ -1912,164 +1929,170 @@ const DoctorPrescriptionForm = () => {
                 className="card-body"
                 style={{ maxHeight: "70vh", overflowY: "auto" }}
               >
-                <h6 className="fw-bold text-dark mb-3">Previous Prescriptions</h6>
+                {reportType === "prescription" && (
+                  <>
+                    <h6 className="fw-bold text-dark mb-3">Previous Prescriptions</h6>
+                    {(() => {
+                      const previousPrescriptions = employeeReport?.previousPrescriptions || [];
 
-                {(() => {
-                  const previousPrescriptions = employeeReport?.previousPrescriptions || [];
-
-                  return previousPrescriptions.length > 0 ? (
-                    previousPrescriptions.map((prescription, index) =>
-                      renderPrescriptionHistoryCard(prescription, `report-panel-${index}`)
-                    )
-                  ) : (
-                    <div className="text-muted">No previous prescriptions available</div>
-                  );
-                })()}
-
-                <hr className="my-4" />
-
-                <h6 className="fw-bold text-dark mb-3">Recent Tests</h6>
-
-                {(() => {
-                  const diagnosisRecords = employeeReport?.diagnosisRecords || [];
-                  const recentTests = diagnosisRecords
-                    .flatMap(record =>
-                      (record?.Tests || []).map((test, index) => ({
-                        key: `${record._id}-${test.Test_ID?._id || test.Test_ID || index}`,
-                        record,
-                        test,
-                        reportDate: test?.Timestamp || getDiagnosisReportDate(record)
-                      }))
-                    )
-                    .sort(
-                      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
-                    )
-                    .slice(0, 5);
-
-                  return recentTests.length > 0 ? (
-                    recentTests.map(({ key, record, test, reportDate }) => {
-                      const status = getReportStatus(test?.Result_Value);
-                      const visitNotes = buildVisitNotes(record?.visitSummary);
-
-                      return (
-                        <div key={key} className="border-bottom pb-2 mb-3">
-                          <div className="d-flex justify-content-between align-items-start gap-2">
-                            <div>
-                              <div className="fw-semibold">
-                                {test?.Test_Name || test?.Test_ID?.Test_Name || "Unknown Test"}
-                              </div>
-                              <small className="text-muted">
-                                {formatDateDMY(reportDate)}
-                              </small>
-                            </div>
-                            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
-                              {status}
-                            </span>
-                          </div>
-
-                          <div className="small mt-2">
-                            Result: {status === "result out" ? `${test?.Result_Value || "-"} ${test?.Units || test?.Test_ID?.Units || ""}`.trim() : "Pending"}
-                          </div>
-
-                          {visitNotes && (
-                            <div className="small text-muted mt-1">
-                              Notes: {visitNotes}
-                            </div>
-                          )}
-
-                          {test?.Reports && test.Reports.length > 0 ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-primary mt-2 me-2 view-action"
-                              onClick={() => setSelectedDiagnosisReport({ record, test })}
-                            >
-                              View Report
-                            </button>
-                          ) : (
-                            <button
-                              className="btn btn-sm btn-outline-secondary mt-2"
-                              disabled
-                            >
-                              No Report
-                            </button>
-                          )}
-                        </div>
+                      return previousPrescriptions.length > 0 ? (
+                        previousPrescriptions.map((prescription, index) =>
+                          renderPrescriptionHistoryCard(prescription, `report-panel-${index}`)
+                        )
+                      ) : (
+                        <div className="text-muted">No previous prescriptions available</div>
                       );
-                    })
-                  ) : (
-                    <div className="text-muted">No tests available</div>
-                  );
-                })()}
+                    })()}
+                  </>
+                )}
 
-                <hr className="my-4" />
+                {reportType === "diagnostic" && (
+                  <>
+                    <h6 className="fw-bold text-dark mb-3">Recent Tests</h6>
+                    {(() => {
+                      const diagnosisRecords = employeeReport?.diagnosisRecords || [];
+                      const recentTests = diagnosisRecords
+                        .flatMap(record =>
+                          (record?.Tests || []).map((test, index) => ({
+                            key: `${record._id}-${test.Test_ID?._id || test.Test_ID || index}`,
+                            record,
+                            test,
+                            reportDate: test?.Timestamp || getDiagnosisReportDate(record)
+                          }))
+                        )
+                        .sort(
+                          (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
+                        )
+                        .slice(0, 5);
 
-                <h6 className="fw-bold text-dark mb-3">Recent X-rays</h6>
+                      return recentTests.length > 0 ? (
+                        recentTests.map(({ key, record, test, reportDate }) => {
+                          const status = getReportStatus(test?.Result_Value);
+                          const visitNotes = buildVisitNotes(record?.visitSummary);
 
-                {(() => {
-                  const xrayRecords = employeeReport?.xrayRecords || [];
-                  const recentXrays = xrayRecords
-                    .flatMap(record =>
-                      (record?.Xrays || []).map((xray, index) => ({
-                        key: `${record._id}-${xray.Xray_ID || xray.Xray_Type || index}`,
-                        record,
-                        xray,
-                        reportDate: xray?.Timestamp || getXrayReportDate(record)
-                      }))
-                    )
-                    .sort(
-                      (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
-                    )
-                    .filter(({ xray }) => {
-                      // only show xrays where results are out
-                      const status = xray?.Findings || xray?.Impression || xray?.Remarks ? "result out" : "pending";
-                      return status === "result out";
-                    })
-                    .slice(0, 5);
-
-                  return recentXrays.length > 0 ? (
-                    recentXrays.map(({ key, record, xray, reportDate }) => {
-                      const status =
-                        xray?.Findings || xray?.Impression || xray?.Remarks
-                          ? "result out"
-                          : "pending";
-
-                      return (
-                        <div key={key} className="border-bottom pb-2 mb-3">
-                          <div className="d-flex justify-content-between align-items-start gap-2">
-                            <div>
-                              <div className="fw-semibold">
-                                {xray?.Xray_Type || "X-ray"}
+                          return (
+                            <div key={key} className="border-bottom pb-2 mb-3">
+                              <div className="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                  <div className="fw-semibold">
+                                    {test?.Test_Name || test?.Test_ID?.Test_Name || "Unknown Test"}
+                                  </div>
+                                  <small className="text-muted">
+                                    {formatDateDMY(reportDate)}
+                                  </small>
+                                </div>
+                                <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
+                                  {status}
+                                </span>
                               </div>
-                              <small className="text-muted">
-                                {formatDateDMY(reportDate)}
-                              </small>
+
+                              <div className="small mt-2">
+                                Result: {status === "result out" ? `${test?.Result_Value || "-"} ${test?.Units || test?.Test_ID?.Units || ""}`.trim() : "Pending"}
+                              </div>
+
+                              {visitNotes && (
+                                <div className="small text-muted mt-1">
+                                  Notes: {visitNotes}
+                                </div>
+                              )}
+
+                              {test?.Reports && test.Reports.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-primary mt-2 me-2 view-action"
+                                  onClick={() => setSelectedDiagnosisReport({ record, test })}
+                                >
+                                  View Report
+                                </button>
+                              ) : (
+                                <button
+                                  className="btn btn-sm btn-outline-secondary mt-2"
+                                  disabled
+                                >
+                                  No Report
+                                </button>
+                              )}
                             </div>
-                            <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
-                              {status}
-                            </span>
-                          </div>
-
-                          <div className="small mt-2">
-                            {xray?.Body_Part || "Body part not available"}
-                          </div>
-
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-primary mt-2 view-action"
-                            disabled={status !== "result out"}
-                            onClick={() => setSelectedXrayReport({ record, xray })}
-                          >
-                            View
-                          </button>
-                        </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-muted">No diagnostic reports available</div>
                       );
-                    })
-                  ) : (
-                    <div className="text-muted">No X-rays available</div>
-                  );
-                })()}
+                    })()}
+                  </>
+                )}
 
-                <hr className="my-4" />
+                {reportType === "xray" && (
+                  <>
+                    <h6 className="fw-bold text-dark mb-3">Recent X-rays</h6>
+                    {(() => {
+                      const xrayRecords = employeeReport?.xrayRecords || [];
+                      const recentXrays = xrayRecords
+                        .flatMap(record =>
+                          (record?.Xrays || []).map((xray, index) => ({
+                            key: `${record._id}-${xray.Xray_ID || xray.Xray_Type || index}`,
+                            record,
+                            xray,
+                            reportDate: xray?.Timestamp || getXrayReportDate(record)
+                          }))
+                        )
+                        .sort(
+                          (a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0)
+                        )
+                        .filter(({ xray }) => {
+                          const status = xray?.Findings || xray?.Impression || xray?.Remarks ? "result out" : "pending";
+                          return status === "result out";
+                        })
+                        .slice(0, 5);
+
+                      return recentXrays.length > 0 ? (
+                        recentXrays.map(({ key, record, xray, reportDate }) => {
+                          const status =
+                            xray?.Findings || xray?.Impression || xray?.Remarks
+                              ? "result out"
+                              : "pending";
+
+                          return (
+                            <div key={key} className="border-bottom pb-2 mb-3">
+                              <div className="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                  <div className="fw-semibold">
+                                    {xray?.Xray_Type || "X-ray"}
+                                  </div>
+                                  <small className="text-muted">
+                                    {formatDateDMY(reportDate)}
+                                  </small>
+                                </div>
+                                <span className={`badge ${status === "result out" ? "bg-success" : "bg-warning text-dark"}`}>
+                                  {status}
+                                </span>
+                              </div>
+
+                              <div className="small mt-2">
+                                {xray?.Body_Part || "Body part not available"}
+                              </div>
+
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-primary mt-2 view-action"
+                                disabled={status !== "result out"}
+                                onClick={() => setSelectedXrayReport({ record, xray })}
+                              >
+                                View
+                              </button>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-muted">No X-ray reports available</div>
+                      );
+                    })()}
+                  </>
+                )}
+
+                {!['prescription', 'diagnostic', 'xray'].includes(reportType) && (
+                  <div className="text-muted">Select a report type</div>
+                )}
 
                 <h6 className="fw-bold text-dark mb-3">Diseases</h6>
 
@@ -2338,13 +2361,29 @@ const DoctorPrescriptionForm = () => {
                         : selectedVisit.employee_id?.Name}
                     </div>
 
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary view-action"
-                      onClick={loadEmployeeReports}
-                    >
-                      View Reports
-                    </button>
+                    <div className="d-flex flex-wrap gap-2 justify-content-end">
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${reportType === "diagnostic" ? "btn-primary" : "btn-outline-primary"}`}
+                        onClick={() => loadEmployeeReports("diagnostic")}
+                      >
+                        Diagnostic Reports
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${reportType === "prescription" ? "btn-primary" : "btn-outline-primary"}`}
+                        onClick={() => loadEmployeeReports("prescription")}
+                      >
+                        Prescription Reports
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${reportType === "xray" ? "btn-primary" : "btn-outline-primary"}`}
+                        onClick={() => loadEmployeeReports("xray")}
+                      >
+                        X-Ray Reports
+                      </button>
+                    </div>
                   </div>
                 )}
 
