@@ -7,6 +7,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# System libraries required by Puppeteer's bundled Chrome
+# (libasound2 is named libasound2t64 on Debian 13+)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libx11-6 libxcb1 libxext6 \
+    fonts-liberation ca-certificates \
+    && (apt-get install -y --no-install-recommends libasound2t64 || apt-get install -y --no-install-recommends libasound2) \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy server files

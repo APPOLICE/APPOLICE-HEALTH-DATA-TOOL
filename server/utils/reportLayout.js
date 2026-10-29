@@ -1093,6 +1093,9 @@ const getBrowser = async () => {
         "--font-render-hinting=none",
       ],
     });
+    getBrowser.instance.catch(() => {
+      getBrowser.instance = null;
+    });
   }
 
   return getBrowser.instance;
