@@ -18,12 +18,15 @@ if (process.env.CLOUDINARY_URL) {
 }
 
 const ensureCloudinaryConfig = () => {
-  if (!process.env.CLOUDINARY_URL && (!cloudName || !apiKey || !apiSecret)) {
+  if (!isCloudinaryConfigured()) {
     throw new Error(
       "Cloudinary credentials are not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET (or CLOUDINARY_URL)."
     );
   }
 };
+
+const isCloudinaryConfigured = () =>
+  Boolean(process.env.CLOUDINARY_URL || (cloudName && apiKey && apiSecret));
 
 const uploadBufferToCloudinary = async (buffer, options = {}) => {
   ensureCloudinaryConfig();
@@ -45,5 +48,6 @@ const uploadBufferToCloudinary = async (buffer, options = {}) => {
 };
 
 module.exports = {
+  isCloudinaryConfigured,
   uploadBufferToCloudinary
 };

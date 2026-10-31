@@ -26,6 +26,10 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(
+  "/uploads/family-pics",
+  express.static(path.join(__dirname, "uploads", "family-pics"))
+);
 // import your router here (adjust the path as needed)
 const instituteApp = require('./apis/institute_api');
 const medicineApp = require("./apis/medicines_api");

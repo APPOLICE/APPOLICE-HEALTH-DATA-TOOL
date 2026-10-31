@@ -1,29 +1,53 @@
 const express = require("express");
 const expressAsyncHandler = require("express-async-handler");
 const multer = require("multer");
+const fs = require("fs/promises");
+const crypto = require("crypto");
 const path = require("path");
 const FamilyMember = require("../models/family_member");
 const Employee = require("../models/employee");
 const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
-const { uploadBufferToCloudinary } = require("../utils/cloudinary");
+const { isCloudinaryConfigured, uploadBufferToCloudinary } = require("../utils/cloudinary");
 const {
   normalizePatientMetrics,
   validateRequiredPatientMetrics
 } = require("../utils/healthMetrics");
 const FamilyApp = express.Router();
+const familyPhotoDirectory = path.join(__dirname, "..", "uploads", "family-pics");
+const photoExtensionsByMimeType = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif"
+};
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|webp/;
-    if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    if (photoExtensionsByMimeType[file.mimetype] && allowedExtensions.includes(extension)) {
       cb(null, true);
     } else {
-      cb(new Error("Only JPEG, PNG, or WebP images are allowed"));
+      cb(new Error("Only JPEG, PNG, WebP, or GIF images are allowed"));
     }
   },
 });
+
+const storeFamilyPhoto = async (buffer, mimetype, memberId) => {
+  if (isCloudinaryConfigured()) {
+    const uploaded = await uploadBufferToCloudinary(buffer, {
+      folder: "family-pics"
+    });
+    return uploaded.secure_url;
+  }
+
+  const filename = `${memberId}-${crypto.randomUUID()}${photoExtensionsByMimeType[mimetype] || ".jpg"}`;
+  await fs.mkdir(familyPhotoDirectory, { recursive: true });
+  await fs.writeFile(path.join(familyPhotoDirectory, filename), buffer);
+  return `uploads/family-pics/${filename}`;
+};
 
 const profilePhotoUploadSingle = (req, res, next) => {
   upload.single("Photo")(req, res, (err) => {
@@ -139,13 +163,6 @@ FamilyApp.post(
       Medical_History,
     };
 
-    if (req.file?.buffer) {
-      const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-        folder: "family-pics"
-      });
-      memberData.Photo = uploaded.secure_url;
-    }
-
     const member = new FamilyMember(memberData);
     const saved = await member.save();
 
@@ -153,7 +170,18 @@ FamilyApp.post(
     employee.FamilyMembers.push(saved._id);
     await employee.save();
 
-    res.status(201).json({ message: "Family member registered", payload: saved });
+    let message = "Family member registered";
+    if (req.file?.buffer) {
+      try {
+        saved.Photo = await storeFamilyPhoto(req.file.buffer, req.file.mimetype, saved._id);
+        await saved.save();
+      } catch (error) {
+        console.error("Family member registered but photo upload failed:", error);
+        message += ". The photo could not be uploaded; you can add it later from the family member profile.";
+      }
+    }
+
+    res.status(201).json({ message, payload: saved });
   })
 );
 
@@ -267,10 +295,7 @@ FamilyApp.put(
         return res.status(404).json({ message: "Family member not found" });
       }
 
-      const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
-        folder: "family-pics"
-      });
-      member.Photo = uploaded.secure_url;
+      member.Photo = await storeFamilyPhoto(req.file.buffer, req.file.mimetype, member._id);
       await member.save();
 
       res.status(200).json({

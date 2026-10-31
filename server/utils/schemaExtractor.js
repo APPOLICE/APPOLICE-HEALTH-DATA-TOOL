@@ -32,7 +32,7 @@ const schemaDefinitions = {
       _id: "ObjectId",
       Employee: "ObjectId (ref: Employee)",
       Name: "String",
-      Relationship: "String (Father, Mother, Wife, Child)",
+      Relationship: "String (Father, Mother, Wife, Husband, Son, Daughter, Child)",
       DOB: "Date",
       Gender: "String (Male, Female)",
       Blood_Group: "String (A+, A-, B+, B-, O+, O-, AB+, AB-, empty)",
